@@ -1,16 +1,18 @@
-# md4go — Go 语言的 Markdown 解析器
+# md4go — A Markdown Parser for Go
 
-md4go 是一个 Go 语言的 Markdown 解析器，采用 push-based 事件驱动模型，不构建 AST。**CommonMark 0.31 合规 652/652**，GFM 扩展（表格/删除线/任务列表/自动链接）全部支持。
+[中文](README.zh.md) | English
 
-## 快速上手
+md4go is a Markdown parser for Go that uses a push-based, event-driven model and does not build an AST. It is **CommonMark 0.31 compliant (652/652)** with full support for GFM extensions (tables / strikethrough / task lists / autolinks).
 
-### 安装
+## Quick Start
+
+### Installation
 
 ```bash
 go get github.com/userpro/md4go
 ```
 
-### 最简用法：Markdown → 纯文本
+### Minimal Example: Markdown → Plain Text
 
 ```go
 package main
@@ -25,14 +27,14 @@ func main() {
     src := []byte("# Hello\n\n- item1\n- item2\n")
     text.Convert(src, os.Stdout, text.WithFlags(parser.DialectGitHub))
 }
-// 输出:
+// Output:
 // Hello
 //
 // item1
 // item2
 ```
 
-### 最简用法：Markdown → HTML
+### Minimal Example: Markdown → HTML
 
 ```go
 package main
@@ -47,7 +49,7 @@ func main() {
     src := []byte("# Hello\n\n- item1\n- item2\n")
     html.Convert(src, os.Stdout, html.WithFlags(parser.DialectGitHub))
 }
-// 输出:
+// Output:
 // <h1>Hello</h1>
 // <ul>
 // <li>item1</li>
@@ -55,66 +57,66 @@ func main() {
 // </ul>
 ```
 
-### 命令行
+### Command Line
 
 ```bash
-# 编译
+# Build
 go build -o md4go ./cmd/md4go
 
-# Markdown → 纯文本（默认 GFM 模式）
+# Markdown → plain text (GFM mode by default)
 echo "# Hello" | ./md4go
 
 # Markdown → HTML
 echo "# Hello" | ./md4go -html
 
-# 流式输入（低内存，仅纯文本模式）
+# Streaming input (low memory, plain text mode only)
 cat large.md | ./md4go -stream
 
-# goldmark 兼容模式
+# goldmark compatibility mode
 echo "| a | b |" | ./md4go -compat goldmark
 ```
 
-## 三层架构
+## Three-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│  业务层（一站式便捷封装）                      │
+│  Convenience Layer (one-line wrappers)       │
 │  text.Convert()    html.Convert()            │
 ├─────────────────────────────────────────────┤
-│  底层（解析 API）                             │
+│  Core Layer (parsing API)                    │
 │  md4go.Parser.Parse(src, renderer)           │
-│  renderer.Renderer 接口                      │
+│  renderer.Renderer interface                 │
 ├─────────────────────────────────────────────┤
-│  用户层（自定义渲染器）                        │
-│  实现 Renderer 接口的 5 个方法                 │
+│  Custom Layer (user-defined renderers)       │
+│  Implement the 5 methods of Renderer         │
 └─────────────────────────────────────────────┘
 ```
 
-- **业务层**（`text`/`html` 包）：一行代码完成转换
-- **底层**（`md4go` 根包）：完整解析 API，事件推送到任意 Renderer
-- **用户层**：实现 `renderer.Renderer` 接口自定义输出格式
+- **Convenience Layer** (`text` / `html` packages): convert in a single call
+- **Core Layer** (`md4go` root package): full parsing API, pushes events to any Renderer
+- **Custom Layer**: implement the `renderer.Renderer` interface for custom output formats
 
-## 使用场景
+## Use Cases
 
-### 场景 1：Markdown 文本提取（RAG/搜索索引/内容清洗）
+### Scenario 1: Markdown Text Extraction (RAG / Search Indexing / Content Cleaning)
 
 ```go
-// 从 Markdown 中提取纯文本，去除所有格式标记
+// Extract plain text from Markdown, stripping all formatting markers
 var buf bytes.Buffer
 text.Convert(markdownBytes, &buf, text.WithFlags(parser.DialectGitHub))
 plainText := buf.String()
 ```
 
-典型用途：
-- RAG 系统的文档预处理
-- 全文搜索引擎的内容索引
-- Markdown 邮件/通知的纯文本版本
-- 聊天消息的文本摘要
+Typical uses:
+- Document preprocessing for RAG systems
+- Content indexing for full-text search engines
+- Plain-text versions of Markdown emails / notifications
+- Text summaries of chat messages
 
-### 场景 2：Markdown → HTML 渲染
+### Scenario 2: Markdown → HTML Rendering
 
 ```go
-// 生成 HTML，兼容 XHTML 模式
+// Generate HTML in XHTML mode
 var buf bytes.Buffer
 html.Convert(markdownBytes, &buf,
     html.WithFlags(parser.DialectGitHub),
@@ -122,21 +124,21 @@ html.Convert(markdownBytes, &buf,
 )
 ```
 
-### 场景 3：流式处理大文件
+### Scenario 3: Streaming Large Files
 
 ```go
-// 逐行读取，内存占用恒定
+// Read line by line with constant memory usage
 file, _ := os.Open("large.md")
 defer file.Close()
 text.ConvertStream(file, os.Stdout, text.WithFlags(parser.DialectGitHub))
 ```
 
-> **注意**：流式模式下 refdef（引用链接定义）遵循"先见先得"规则，前向引用会退化为字面文本。一次性解析（`Convert`）无此限制。
+> **Note**: In streaming mode, reference link definitions (refdefs) follow a "first-seen-first-served" rule — forward references degrade to literal text. One-shot parsing (`Convert`) has no such limitation.
 
-### 场景 4：自定义渲染器（结构化数据提取）
+### Scenario 4: Custom Renderer (Structured Data Extraction)
 
 ```go
-// 提取所有链接
+// Extract all links
 type LinkExtractor struct {
     links []string
     inLink bool
@@ -156,72 +158,72 @@ func (e *LinkExtractor) EnterSpan(s ast.SpanType, d any) error {
 func (e *LinkExtractor) LeaveSpan(ast.SpanType, any) error { return nil }
 func (e *LinkExtractor) Text(ast.TextType, []byte) error    { return nil }
 
-// 使用
+// Usage
 p := md4go.New(md4go.WithFlags(parser.DialectGitHub))
 ext := &LinkExtractor{}
 p.Parse(src, ext)
 fmt.Println(ext.links) // ["https://example.com", ...]
 ```
 
-## API 参考
+## API Reference
 
-### 根包 `md4go` — 解析 API
+### Root Package `md4go` — Parsing API
 
 ```go
-// 创建解析器
+// Create a parser
 p := md4go.New(
-    md4go.WithFlags(parser.DialectGitHub),       // 设置解析标志
-    md4go.WithExtensions(&extension.Table{}),     // 注册扩展
+    md4go.WithFlags(parser.DialectGitHub),       // set parse flags
+    md4go.WithExtensions(&extension.Table{}),     // register extensions
 )
 
-// 解析 []byte → 推送事件到 renderer
+// Parse []byte → push events to renderer
 p.Parse(src, myRenderer)
 
-// 流式解析 io.Reader → 推送事件到 renderer
+// Stream-parse io.Reader → push events to renderer
 p.ParseStream(lineSource, myRenderer)
 ```
 
-### `text` 包 — 纯文本
+### `text` Package — Plain Text
 
 ```go
-// 一站式转换
+// One-shot conversion
 text.Convert(src, writer, text.WithFlags(...), text.WithExtensions(...))
 
-// 流式转换
+// Streaming conversion
 text.ConvertStream(reader, writer, text.WithFlags(...))
 
-// 获取渲染器实例（高级用法）
+// Get a renderer instance (advanced)
 pt := text.NewPlainText(writer)
 p.Parse(src, pt)
 pt.Flush()
 ```
 
-### `html` 包 — HTML
+### `html` Package — HTML
 
 ```go
-// 一站式转换
+// One-shot conversion
 html.Convert(src, writer, html.WithFlags(...), html.WithExtensions(...), html.WithRendererFlags(...))
 
-// XHTML 模式（默认）
+// XHTML mode (default)
 h := html.NewHTML(writer)
 
-// 指定渲染器标志
+// Specify renderer flags
 h := html.NewWithFlags(writer, html.FlagXHTML|html.FlagVerbatimEntities)
 
-// 高级用法
+// Advanced usage
 h := html.NewHTMLWithWriter(renderer.NewBufWriter(writer))
 ```
 
-**HTML 渲染器标志**：
+**HTML renderer flags**:
 
-| 标志 | 值 | 说明 |
+| Flag | Value | Description |
 |---|---|---|
-| `FlagDebug` | 0x0001 | 调试输出 |
-| `FlagVerbatimEntities` | 0x0002 | 实体原样输出（不翻译为 UTF-8） |
-| `FlagSkipUTF8BOM` | 0x0004 | 跳过输入开头的 UTF-8 BOM |
-| `FlagXHTML` | 0x0008 | XHTML 自闭合标签（`<br />`） |
+| `FlagDebug` | 0x0001 | Debug output |
+| `FlagVerbatimEntities` | 0x0002 | Output entities verbatim (not translated to UTF-8) |
+| `FlagSkipUTF8BOM` | 0x0004 | Skip a leading UTF-8 BOM in the input |
+| `FlagXHTML` | 0x0008 | XHTML self-closing tags (`<br />`) |
 
-### `renderer` 包 — 接口定义
+### `renderer` Package — Interface Definition
 
 ```go
 type Renderer interface {
@@ -233,122 +235,117 @@ type Renderer interface {
 }
 ```
 
-## 调优指南
+## Tuning Guide
 
-### 选择解析模式
+### Choosing a Parse Mode
 
-| 模式 | 常量 | 适用场景 |
+| Mode | Constant | Use Case |
 |---|---|---|
-| CommonMark | `parser.DialectCommonMark` | 标准 Markdown，严格合规 |
-| GitHub Flavored | `parser.DialectGitHub` | GFM 扩展（表格/删除线/任务列表/自动链接） |
+| CommonMark | `parser.DialectCommonMark` | Standard Markdown, strict compliance |
+| GitHub Flavored | `parser.DialectGitHub` | GFM extensions (tables / strikethrough / task lists / autolinks) |
 
 `DialectGitHub` = `PermissiveAutolinks | FlagTables | FlagStrikethrough | FlagTasklists | FlagAdmonitions | FlagFootnotes`
 
-### 选择输入方式
+### Choosing an Input Mode
 
-| 方式 | API | 内存 | 前向引用 |
+| Mode | API | Memory | Forward References |
 |---|---|---|---|
-| 一次性 `[]byte` | `Parse` / `Convert` | O(n) | ✅ 完整支持 |
-| 流式 `io.Reader` | `ParseStream` / `ConvertStream` | O(行) | ❌ 先见先得 |
+| One-shot `[]byte` | `Parse` / `Convert` | O(n) | ✅ Fully supported |
+| Streaming `io.Reader` | `ParseStream` / `ConvertStream` | O(line) | ❌ First-seen-first-served |
 
-**建议**：文档 < 10MB 用 `Convert`，超大文档用 `ConvertStream`。
+**Recommendation**: use `Convert` for documents < 10 MB; use `ConvertStream` for very large documents.
 
-### 选择渲染目标
+### Choosing a Render Target
 
-| 目标 | 包 | 特点 |
+| Target | Package | Characteristics |
 |---|---|---|
-| 纯文本 | `text` | 去除所有格式，保留文本内容和语义分隔 |
-| HTML | `html` | 完整 HTML 输出，XHTML/HTML5 可选 |
-| 自定义 | `renderer` | 实现 Renderer 接口 |
+| Plain text | `text` | Strips all formatting, preserves text content and semantic boundaries |
+| HTML | `html` | Full HTML output, XHTML / HTML5 selectable |
+| Custom | `renderer` | Implement the Renderer interface |
 
-### 性能提示
+### Performance Tips
 
-1. **复用 Parser**：`md4go.New()` 创建的 `Parser` 可多次调用 `Parse()`
-2. **流式节省内存**：`ConvertStream` 逐行读取，内存占用与文档大小无关
-3. **BufWriter 自动缓冲**：`text.NewPlainText(w)` 和 `html.NewHTML(w)` 内部使用 4KB 缓冲区
-4. **按需启用扩展**：只注册需要的扩展，减少解析开销
+1. **Reuse the Parser**: a `Parser` created by `md4go.New()` can be used for multiple `Parse()` calls
+2. **Save memory with streaming**: `ConvertStream` reads line by line, with memory usage independent of document size
+3. **Automatic BufWriter buffering**: `text.NewPlainText(w)` and `html.NewHTML(w)` use a 4 KB internal buffer
+4. **Enable extensions on demand**: register only the extensions you need to reduce parsing overhead
 
-### 扩展注入
+### Extension Injection
 
 ```go
-// 仅启用表格和删除线
+// Enable only tables and strikethrough
 p := md4go.New(md4go.WithExtensions(
     &extension.Table{},
     &extension.Strikethrough{},
 ))
 
-// GFM 全量扩展（快捷方式）
+// All GFM extensions (shortcut)
 p := md4go.New(md4go.WithFlags(parser.DialectGitHub))
-// 等价于:
+// Equivalent to:
 p := md4go.New(md4go.WithExtensions(extension.GFM...))
 ```
 
-**可用扩展**：
+**Available extensions**:
 
-| 扩展 | 语法 |
+| Extension | Syntax |
 |---|---|
-| `extension.Strikethrough` | `~~删除线~~` |
-| `extension.Table` | GFM 表格 |
-| `extension.Tasklist` | `- [x] 任务` |
-| `extension.PermissiveAutolinks` | URL/邮箱/WWW 自动链接 |
-| `extension.Footnote` | `[^1]` 脚注 |
-| `extension.LatexMath` | `$行内$` / `$$块级$$` |
-| `extension.Wikilink` | `[[链接]]` |
-| `extension.Superscript` | `^上标^` |
-| `extension.Subscript` | `~下标~` |
-| `extension.Spoiler` | `||剧透||` |
-| `extension.Highlight` | `==高亮==` |
-| `extension.Admonition` | `> [!NOTE]` 告诫块 |
+| `extension.Strikethrough` | `~~strikethrough~~` |
+| `extension.Table` | GFM tables |
+| `extension.Tasklist` | `- [x] task` |
+| `extension.PermissiveAutolinks` | URL / email / WWW autolinks |
+| `extension.Footnote` | `[^1]` footnotes |
+| `extension.LatexMath` | `$inline$` / `$$block$$` |
+| `extension.Wikilink` | `[[link]]` |
+| `extension.Superscript` | `^superscript^` |
+| `extension.Subscript` | `~subscript~` |
+| `extension.Spoiler` | `||spoiler||` |
+| `extension.Highlight` | `==highlight==` |
+| `extension.Admonition` | `> [!NOTE]` admonition blocks |
 
-## 合规性
+## Compliance
 
-| 标准 | 结果 |
+| Standard | Result |
 |---|---|
 | CommonMark 0.31 | 652/652 ✅ |
-| GFM 表格/删除线/任务列表/自动链接 | 全部通过 ✅ |
+| GFM tables / strikethrough / task lists / autolinks | All passing ✅ |
 
-## 已知差异
+## Known Differences
 
-md4go 默认遵循 GFM/CommonMark 标准。与其他实现的差异分两类：**有意改进**（默认即生效，无需 flag）和**可通过兼容 flag 对齐**。
+md4go follows the GFM / CommonMark standards by default. Differences from other implementations fall into two categories: **intentional improvements** (active by default, no flag needed) and **differences alignable via compatibility flags**.
 
-### 有意改进（默认行为）
+### Intentional Improvements (Default Behavior)
 
-| 编号 | 场景 | 默认行为 | 说明 |
+| ID | Scenario | Default Behavior | Notes |
 |---|---|---|---|
-| S-01 | `||` 表格单元格 | 拆分为单元格边界 | `FlagProtectDoublePipe` 可 opt-in 保护 `||` 不被分割 |
-| S-02/04 | tight 列表段落分隔 | 保留 `\n` 词界、发出 P 事件 | 更利于文本提取 |
-| S-03 | `[[target\|label]]` Wikilink | 识别为 wikilink | 支持带标签的 wikilink |
-| S-05 | 脚注引用 | 输出 `[N]` | 保留引用编号 |
-| S-06 | 含 NULL 的 code span | 识别并替换为 U+FFFD | 遵循 CommonMark |
+| S-01 | `||` in table cells | Split as a cell boundary | `FlagProtectDoublePipe` can opt in to keep `||` unsplit |
+| S-02/04 | Tight list paragraph separation | Preserves `\n` word boundaries, emits P events | Better for text extraction |
+| S-03 | `[[target\|label]]` wikilink | Recognized as a wikilink | Supports wikilinks with labels |
+| S-05 | Footnote references | Outputs `[N]` | Preserves the reference number |
+| S-06 | Code spans containing NULL | Recognized and replaced with U+FFFD | Follows CommonMark |
 
-### 与 goldmark 的差异
+### Differences from goldmark
 
-主要差异可通过 `GoldmarkCompat` 预设对齐：
+Major differences can be aligned via the `GoldmarkCompat` preset:
 
-| 场景 | 对齐 flag | 具体案例 |
+| Scenario | Alignment Flag | Example |
 |---|---|---|
-| 表格不可中断段落（GFM 标准） | `FlagTableInterruptParagraph` | 段落后接表格：默认不识别为表格；设 flag 后段落末行提升为表头 |
-| HTML 实体解码 | `FlagDecodeEntities` | `&amp; &copy;`：默认保留实体文本；设 flag 后解码为 `& ©` |
-| 表格列数严格校验 | `FlagStrictTableColumns` | 标题 3 列、分隔行 2 列：默认宽松识别；设 flag 后不识别为表格 |
-| 行内跨度/括号多余空格 | — | goldmark DOM 遍历副作用，不应复制 |
+| Tables cannot interrupt a paragraph (GFM standard) | `FlagTableInterruptParagraph` | Paragraph followed by a table: not recognized as a table by default; with the flag, the last line of the paragraph is promoted to the table header |
+| HTML entity decoding | `FlagDecodeEntities` | `&amp; &copy;`: entities kept as text by default; decoded to `& ©` with the flag |
+| Strict table column count validation | `FlagStrictTableColumns` | Header 3 cols, delimiter 2 cols: loosely recognized by default; not recognized as a table with the flag |
+| Inline span / bracket extra spaces | — | Side effect of goldmark's DOM traversal, should not be replicated |
 
-> 完整对比报告见 `DIFF_REPORT.md`。
+> See `DIFF_REPORT.md` for the full comparison report.
 
-## 项目文档
+## Project Documentation
 
-| 文档 | 位置 | 说明 |
+| Document | Location | Description |
 |---|---|---|
-| README.md | 根目录 | 快速上手 + API 参考 |
-| ARCHITECTURE.md | 根目录 | 架构设计 |
-| DESIGN.md | 根目录 | 算法设计细节 |
-| DIFF_REPORT.md | 根目录 | md4go/md4c/goldmark 三方对比报告 |
-| TESTING.md | 根目录 | 测试体系说明 |
-| SOP.md | dev_docs/ | 迭代标准操作规程 |
-| PROGRESS.md | dev_docs/ | 实现进度 + 迭代记录 |
-| compatibility_flags.md | dev_docs/ | 兼容性 Flag 参考手册 |
-| md4go_技术方案.md | dev_docs/ | 技术方案设计 |
-| md4c_ARCHITECTURE.md | dev_docs/ | md4c 架构参考 |
+| README.md | root | Quick start + API reference (English) |
+| README.zh.md | root | 快速上手 + API 参考（中文） |
+| ARCHITECTURE.md | root | Architecture design |
+| DESIGN.md | root | Algorithm design details |
+| TESTING.md | root | Testing system overview |
 
-## 致谢
+## Acknowledgments
 
-本项目最初基于 [md4c](https://github.com/mity/md4c) v0.5.3 的算法设计进行 Go 移植，在此基础上做了工程化改进和标准合规性增强。
+This project was originally ported to Go based on the algorithm design of [md4c](https://github.com/mity/md4c) v0.5.3, with subsequent engineering improvements and standards-compliance enhancements on top.
