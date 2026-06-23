@@ -1,6 +1,6 @@
 # md4go 架构文档
 
-> 按图索骥审查代码的参考文档。涵盖包结构、依赖方向、核心接口、数据流和关键实现映射。
+> 按图索骥审查代码的参考文档。涵盖包结构、依赖方向、核心接口、数据流和关键设计决策。
 
 ## 1. 包结构总览
 
@@ -12,19 +12,28 @@ md4go/                          ← Go module root
 ├── renderer/
 │   ├── renderer.go             ← Renderer 接口（5 个回调方法）
 │   └── writer.go               ← BufWriter（带缓冲的零拷贝写入器）
-├── parser/                     ← 解析器核心（最大包，~28 个源文件）
-│   ├── parser.go               ← Parser 结构体 + Parse/ParseStream
+├── parser/                     ← 解析器核心（最大包，21 个源文件 + 12 个测试文件）
+│   ├── parser.go               ← Parser 结构体 + Parse/ParseStream/parseLinesInternal
 │   ├── context.go              ← 解析上下文（mark 栈、line 状态）
-│   ├── block.go                ← 块级解析（标题/代码/引用/列表/表格/脚注）
-│   ├── container.go            ← 容器块处理（blockquote/list 嵌套）
-│   ├── emphasis.go             ← 强调/加粗 mark 匹配
+│   ├── block.go                ← 行分析 analyzeLine + 行处理 processLine
+│   ├── block_stack.go          ← Block/Line/VerbatimLine/Container + blockStack
+│   ├── container.go            ← 容器块处理（blockquote/list 嵌套、admonition 检测）
+│   ├── inline.go               ← 行内处理三阶段管线 + processInlines 事件发射
+│   ├── mark.go                 ← Mark 结构体 + markStacks（19 个 opener 栈）+ collectMarks
+│   ├── emphasis.go             ← 强调/加粗 Rule-of-3 算法 + 各 mark 类型分析器
+│   ├── link.go                 ← 链接/图片/脚注引用 bracket 解析 + resolveBrackets
 │   ├── codespan.go             ← 行内代码 span
-│   ├── autolink.go             ← 自动链接检测
-│   ├── html_block.go           ← HTML 块类型判定
-│   ├── attribute.go            ← 属性解析（link destination/title）
-│   ├── flags.go                ← Flags 位掩码 + 常量
+│   ├── autolink.go             ← 尖括号自动链接 + raw HTML inline 检测
+│   ├── permissive_autolink.go  ← 无尖括号 URL/email/WWW 自动链接
+│   ├── html_block.go           ← HTML 块 7 种类型判定
+│   ├── attribute.go            ← 属性解析（link destination/title → Attribute）
+│   ├── refdef.go               ← 引用链接定义 + 脚注定义检测/收集
+│   ├── table.go                ← GFM 表格行解析
+│   ├── trigger.go              ← BlockTrigger 接口 + 字符索引触发表 + 内置触发器
+│   ├── flags.go                ← Flags 位掩码 + 常量 + Dialect 预设
 │   ├── extender.go             ← Extender 接口 + Registrar
-│   └── ...                     ← 其他内部模块
+│   ├── compat.go               ← 兼容性 flag 预计算决策
+│   └── md4c_punct.go           ← Unicode 标点分类表（opener/closer 判定用）
 ├── stream/
 │   └── line_source.go          ← LineSource 接口 + SliceSource/ReaderSource
 ├── text/
@@ -35,12 +44,13 @@ md4go/                          ← Go module root
 │   ├── render.go               ← HTML 渲染器实现
 │   └── entity.go               ← HTML 实体查找表
 ├── extension/
-│   ├── extender.go             ← 包文档 + 通用说明
-│   ├── gfm.go                  ← GFM 扩展集（Strikethrough/Table/Tasklist/Autolink）
-│   └── extra.go                ← 额外扩展（Footnote/Spoiler/Math/Wikilink/Sup/Sub/Mark/Admonition）
+│   ├── extender.go             ← 包文档（Extender 机制说明）
+│   └── gfm.go                  ← 全部 12 个扩展类型 + GFM 预设集
 ├── cmd/
 │   └── md4go/
 │       └── main.go             ← CLI 入口
+├── integration/                ← 集成测试（package integration_test，导入 md4go 及子包）
+├── testdata/                   ← 测试数据（CommonMark spec / 扩展 spec / fuzz 语料）
 └── diffcheck/                  ← 对拍测试工具（独立 go.mod）
 ```
 
@@ -151,44 +161,55 @@ p := md4go.New(md4go.WithFlags(parser.DialectGitHub))
 p.Parse([]byte("# Hello"), &MyRenderer{})
 ```
 
-## 4. 核心实现映射（md4c C → md4go Go）
+## 4. 核心类型与函数索引
 
 ### 4.1 解析器核心
 
-| md4c C 文件/函数 | md4go Go 文件 | 说明 |
+| 文件 | 关键类型/函数 | 职责 |
 |---|---|---|
-| `md4c.c: md_parse()` | `parser/parser.go: Parse()` | 主解析入口 |
-| `md4c.c: MD_CTX` | `parser/context.go: context` | 解析上下文 |
-| `md4c.c: md_process_line()` | `parser/block.go` | 行处理 → 块级构建 |
-| `md4c.c: md_process_inlines()` | `parser/emphasis.go` | 行内处理 → mark 匹配 |
-| `md4c.c: md_analyze_marks()` | `parser/emphasis.go: analyzeMarks()` | mark 栈分析 |
-| `md4c.c: md_resolve_links()` | `parser/autolink.go` | 链接解析 |
-| `md4c.h: MD_BLOCKTYPE` | `ast/events.go: BlockType` | 块级类型枚举 |
-| `md4c.h: MD_SPANTYPE` | `ast/events.go: SpanType` | 行内类型枚举 |
-| `md4c.h: MD_TEXTTYPE` | `ast/events.go: TextType` | 文本类型枚举 |
+| `parser/parser.go` | `Parser`, `Parse()`, `ParseStream()`, `parseLinesInternal()` | 解析器主体 + 行循环主流程 |
+| `parser/context.go` | `context` | 解析上下文（mark 栈、容器栈、refdef map） |
+| `parser/block.go` | `analyzeLine()`, `processLine()`, `lineAnalysis`, `LineType` | 行类型分析 + 块级构建/关闭 |
+| `parser/block_stack.go` | `Block`, `Line`, `VerbatimLine`, `Container`, `blockStack` | 扁平块存储 + 容器状态 |
+| `parser/inline.go` | `analyzeInlines()`, `processInlines()` | 行内三阶段管线 + 事件发射 |
+| `parser/mark.go` | `Mark`, `markStacks`, `collectMarks()` | Mark 结构体 + 19 个 opener 栈 + mark 收集 |
+| `parser/emphasis.go` | `analyzeMarks()`, `analyzeEmph()`, `analyzeTilde()` 等 | Rule-of-3 强调匹配 + 各 mark 类型分析器 |
+| `parser/link.go` | `analyzeBracket()`, `resolveBrackets()` | 链接/图片/脚注/wikilink bracket 解析 |
+| `parser/refdef.go` | `consumeLinkRefDefs()`, `RefDef`, `FootnoteDef` | 引用链接定义 + 脚注定义检测/收集 |
+| `parser/flags.go` | `Flags`, `DialectCommonMark`, `DialectGitHub` | 位掩码标志 + Dialect 预设 |
+| `parser/trigger.go` | `BlockTrigger`, `triggerTable` | 字符索引块触发器分发 |
+| `parser/extender.go` | `Extender`, `Registrar` | 扩展注入接口 |
+| `ast/events.go` | `BlockType`, `SpanType`, `TextType`, 各 `Detail` 结构体 | 事件类型枚举 + 详情结构 |
 
 ### 4.2 渲染器
 
-| md4c C | md4go Go | 说明 |
+| 文件 | 关键类型/函数 | 职责 |
 |---|---|---|
-| `md4c-html.c` | `html/render.go` | HTML 渲染器 |
-| `md4c-plain/main.c` | `text/plaintext.go` | PlainText 渲染器 |
-| `md4c-html.c: MD_HTML_FLAG_*` | `html/convert.go: Flags` | 渲染器标志位 |
-| `md4c-html.c: render_html_escaped()` | `html/render.go: writeEscaped()` | HTML 转义 |
-| `md4c-html.c: render_entity()` | `html/render.go: renderEntity()` | 实体翻译 |
-| `md4c-html.c: render_url_escaped()` | `html/render.go: writeURLEscaped()` | URL 编码 |
+| `renderer/renderer.go` | `Renderer` 接口 | 5 回调契约（EnterBlock/LeaveBlock/EnterSpan/LeaveSpan/Text） |
+| `renderer/writer.go` | `BufWriter` | 4KB 带缓冲写入器 |
+| `text/plaintext.go` | `PlainText` | 纯文本渲染器实现 |
+| `text/text.go` | `Convert()`, `ConvertStream()`, `NewPlainText()` | 纯文本业务层封装 |
+| `html/render.go` | `HTML`, `writeEscaped()`, `renderEntity()`, `writeURLEscaped()` | HTML 渲染器实现 |
+| `html/convert.go` | `Convert()`, `NewHTML()`, `NewWithFlags()`, `Flags` | HTML 业务层封装 + 渲染器标志 |
+| `html/entity.go` | HTML 实体查找表 | 命名实体 → Unicode 翻译 |
 
 ### 4.3 扩展系统
 
-| md4c C | md4go Go | 说明 |
+| 扩展 | 语法 | 注册内容 |
 |---|---|---|
-| `MD_FLAG_STRIKETHROUGH` | `extension/Strikethrough` | ~~删除线~~ |
-| `MD_FLAG_TABLES` | `extension/Table` | GFM 表格 |
-| `MD_FLAG_TASKLISTS` | `extension.Tasklist` | 任务列表 |
-| `MD_FLAG_PERMISSIVE*` | `extension.PermissiveAutolinks` | 自动链接 |
-| `MD_FLAG_LATEXMATHSPANS` | `extension.LatexMath` | LaTeX 数学 |
-| `MD_FLAG_WIKILINKS` | `extension.Wikilink` | `[[wikilink]]` |
-| `MD_FLAG_FOOTNOTES` | `extension.Footnote` | 脚注 |
+| `extension.Strikethrough` | `~~删除线~~` | `FlagStrikethrough` + mark char `~` |
+| `extension.Table` | GFM 表格 | `FlagTables` + mark char `\|` |
+| `extension.TaskList` | `- [x]` 任务列表 | `FlagTasklists` |
+| `extension.PermissiveAutolinks` | URL/Email/WWW 自动链接 | `PermissiveAutolinks` + mark chars `@ : .` |
+| `extension.LatexMath` | `$...$` / `$$...$$` | `FlagLatexMathSpans` + mark char `$` |
+| `extension.Wikilink` | `[[wikilink]]` | `FlagWikilinks` + mark char `\|` |
+| `extension.Footnote` | `[^1]` 脚注 | `FlagFootnotes` |
+| `extension.Admonition` | `> [!NOTE]` 告诫块 | `FlagAdmonitions` |
+| `extension.Superscript` | `^上标^` | `FlagSuperscripts` + mark char `^` |
+| `extension.Subscript` | `~下标~` | `FlagSubscripts` + mark char `~` |
+| `extension.Spoiler` | `\|\|剧透\|\|` | `FlagSpoilers` + mark char `\|` |
+| `extension.Highlight` | `==高亮==` | `FlagHighlight` + mark char `=` |
+| `extension.GFM` | GFM 预设 | 6 个扩展的组合切片 |
 
 ## 5. 关键设计决策
 
@@ -221,14 +242,16 @@ md4go.New()  →  Parser{p: *parser.Parser}
   ▼
 Parser.Parse(src, renderer)
   │
-  ├── parser.newSliceSource(src)      ← 将 []byte 切分为行
+  ├── stream.NewSliceSource(src)     ← 将 []byte 切分为行（零拷贝）
   │
-  ├── parser.firstPass()              ← 块级构建 + refdef 收集
-  │     ├── md_process_line()
-  │     └── mark 栈积累
+  ├── Pass 1: parseLinesInternal()   ← 块级构建 + refdef 收集（用 discardRenderer）
+  │     ├── analyzeLine()
+  │     ├── processLine()
+  │     └── refDefs / footnoteDefs 收集
   │
-  ├── parser.secondPass()             ← 行内解析 + 事件发射
-  │     ├── md_process_inlines()
+  ├── Pass 2: parseLinesInternal()   ← 完整渲染（预填充 refdef 后）
+  │     ├── analyzeLine()
+  │     ├── processLine() → 块关闭时触发 analyzeInlines + processInlines
   │     ├── mark 匹配 → EnterSpan/LeaveSpan
   │     └── Text 事件
   │
@@ -246,7 +269,8 @@ text.ConvertStream(reader, writer, opts...)
   │
   └── parser.ParseStream(lineSource, renderer)
         │
-        └── 同 firstPass + secondPass，但行来源为 LineSource
+        └── 单遍 parseLinesInternal()，行来源为 LineSource
+            （refdef 先见先得，前向引用退化为字面文本）
 ```
 
 ## 7. 审查清单
@@ -256,10 +280,14 @@ text.ConvertStream(reader, writer, opts...)
 1. **`ast/events.go`** — 理解所有事件类型，这是所有代码的"词汇表"
 2. **`renderer/renderer.go`** — 理解 Renderer 接口，这是解析器和渲染器的"契约"
 3. **`md4go.go`** — 理解用户层 API，最简单的入口
-4. **`parser/parser.go`** — 理解 Parse/ParseStream 主流程
+4. **`parser/parser.go`** — 理解 Parse/ParseStream/parseLinesInternal 主流程
 5. **`parser/context.go`** — 理解解析上下文，所有状态都在这里
 6. **`parser/flags.go`** — 理解 flags 常量，控制解析行为
-7. **`text/plaintext.go`** — 最简单的 Renderer 实现，理解事件消费
-8. **`html/render.go`** — 最完整的 Renderer 实现，理解所有事件类型
-9. **`extension/gfm.go`** — 理解扩展注入机制
-10. **`parser/block.go`** — 理解块级解析核心逻辑
+7. **`parser/block.go`** — 理解 analyzeLine 行类型分析 + processLine 块构建/关闭
+8. **`parser/mark.go`** — 理解 Mark 结构体和 19 个 opener 栈（Rule-of-3 基础）
+9. **`parser/emphasis.go`** — 理解 Rule-of-3 强调匹配算法
+10. **`parser/inline.go`** — 理解行内三阶段管线和事件发射
+11. **`parser/link.go`** — 理解 bracket 配对和链接/图片解析
+12. **`text/plaintext.go`** — 最简单的 Renderer 实现，理解事件消费
+13. **`html/render.go`** — 最完整的 Renderer 实现，理解所有事件类型
+14. **`extension/gfm.go`** — 理解扩展注入机制和全部 12 个扩展

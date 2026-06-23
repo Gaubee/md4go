@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"md4go/parser"
-	"md4go/text"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/text"
 )
 
 // TestStreamConsistencyOnEdgeCases verifies that Convert and ConvertStream

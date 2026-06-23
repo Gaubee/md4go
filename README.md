@@ -1,13 +1,13 @@
 # md4go — Go 语言的 Markdown 解析器
 
-md4go 是 [md4c](https://github.com/mity/md4c) v0.5.3 的 Go 移植，采用 push-based 事件驱动模型。**CommonMark 0.31 合规 652/652**，GFM 扩展（表格/删除线/任务列表/自动链接）全部支持。
+md4go 是一个 Go 语言的 Markdown 解析器，采用 push-based 事件驱动模型，不构建 AST。**CommonMark 0.31 合规 652/652**，GFM 扩展（表格/删除线/任务列表/自动链接）全部支持。
 
 ## 快速上手
 
 ### 安装
 
 ```bash
-go get md4go
+go get github.com/userpro/md4go
 ```
 
 ### 最简用法：Markdown → 纯文本
@@ -67,8 +67,11 @@ echo "# Hello" | ./md4go
 # Markdown → HTML
 echo "# Hello" | ./md4go -html
 
-# 流式输入（低内存）
+# 流式输入（低内存，仅纯文本模式）
 cat large.md | ./md4go -stream
+
+# goldmark 兼容模式
+echo "| a | b |" | ./md4go -compat goldmark
 ```
 
 ## 三层架构
@@ -294,8 +297,8 @@ p := md4go.New(md4go.WithExtensions(extension.GFM...))
 | `extension.Superscript` | `^上标^` |
 | `extension.Subscript` | `~下标~` |
 | `extension.Spoiler` | `||剧透||` |
-| `extension.Mark` | `==高亮==` |
-| `extension.Admonition` | `!!! note 提示` |
+| `extension.Highlight` | `==高亮==` |
+| `extension.Admonition` | `> [!NOTE]` 告诫块 |
 
 ## 合规性
 
@@ -303,7 +306,33 @@ p := md4go.New(md4go.WithExtensions(extension.GFM...))
 |---|---|
 | CommonMark 0.31 | 652/652 ✅ |
 | GFM 表格/删除线/任务列表/自动链接 | 全部通过 ✅ |
-| md4c v0.5.3 对拍（loose 模式） | md4go≠md4c: 56/10350（均为有意改进） |
+
+## 已知差异
+
+md4go 默认遵循 GFM/CommonMark 标准。与其他实现的差异分两类：**有意改进**（默认即生效，无需 flag）和**可通过兼容 flag 对齐**。
+
+### 有意改进（默认行为）
+
+| 编号 | 场景 | 默认行为 | 说明 |
+|---|---|---|---|
+| S-01 | `||` 表格单元格 | 拆分为单元格边界 | `FlagProtectDoublePipe` 可 opt-in 保护 `||` 不被分割 |
+| S-02/04 | tight 列表段落分隔 | 保留 `\n` 词界、发出 P 事件 | 更利于文本提取 |
+| S-03 | `[[target\|label]]` Wikilink | 识别为 wikilink | 支持带标签的 wikilink |
+| S-05 | 脚注引用 | 输出 `[N]` | 保留引用编号 |
+| S-06 | 含 NULL 的 code span | 识别并替换为 U+FFFD | 遵循 CommonMark |
+
+### 与 goldmark 的差异
+
+主要差异可通过 `GoldmarkCompat` 预设对齐：
+
+| 场景 | 对齐 flag | 具体案例 |
+|---|---|---|
+| 表格不可中断段落（GFM 标准） | `FlagTableInterruptParagraph` | 段落后接表格：默认不识别为表格；设 flag 后段落末行提升为表头 |
+| HTML 实体解码 | `FlagDecodeEntities` | `&amp; &copy;`：默认保留实体文本；设 flag 后解码为 `& ©` |
+| 表格列数严格校验 | `FlagStrictTableColumns` | 标题 3 列、分隔行 2 列：默认宽松识别；设 flag 后不识别为表格 |
+| 行内跨度/括号多余空格 | — | goldmark DOM 遍历副作用，不应复制 |
+
+> 完整对比报告见 `DIFF_REPORT.md`。
 
 ## 项目文档
 
@@ -311,6 +340,7 @@ p := md4go.New(md4go.WithExtensions(extension.GFM...))
 |---|---|---|
 | README.md | 根目录 | 快速上手 + API 参考 |
 | ARCHITECTURE.md | 根目录 | 架构设计 |
+| DESIGN.md | 根目录 | 算法设计细节 |
 | DIFF_REPORT.md | 根目录 | md4go/md4c/goldmark 三方对比报告 |
 | TESTING.md | 根目录 | 测试体系说明 |
 | SOP.md | dev_docs/ | 迭代标准操作规程 |
@@ -321,4 +351,4 @@ p := md4go.New(md4go.WithExtensions(extension.GFM...))
 
 ## 致谢
 
-本项目是 [md4c](https://github.com/mity/md4c) v0.5.3 的 Go 移植，保留了 md4c 的 push-based 事件驱动架构和 C 版本的精确行为映射。
+本项目最初基于 [md4c](https://github.com/mity/md4c) v0.5.3 的算法设计进行 Go 移植，在此基础上做了工程化改进和标准合规性增强。

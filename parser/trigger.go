@@ -1,6 +1,6 @@
 package parser
 
-import "md4go/ast"
+import "github.com/userpro/md4go/ast"
 
 // BlockTrigger checks whether a line at the given offset starts a specific
 // block type. Triggers are registered in a [256] indexed table and dispatched

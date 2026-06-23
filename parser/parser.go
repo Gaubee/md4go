@@ -1,19 +1,19 @@
 // Package parser implements the Markdown parser core.
 //
-// Architecture follows md4c's two-pass + push model, adapted to Go:
-//   - First pass: analyzeLine + processLine — build block structure
+// Architecture: two-pass + push model.
+//   - Pass 1 (Parse): collect reference definitions with a discard renderer
+//   - Pass 2 (Parse): full rendering with pre-populated refdefs
 //   - Block close: emit events to renderer (unified incremental pipeline)
 //
-// M4 unified incremental pipeline: Convert ([]byte) and ConvertStream
-// (io.Reader) share the same parseLines core, only the LineSource differs.
-// Blocks are closed and emitted as soon as they're complete — no second
-// pass is needed, matching md4c's natural incrementality.
+// Convert ([]byte) and ConvertStream (io.Reader) share the same
+// parseLinesInternal core, only the LineSource differs. Blocks are closed
+// and emitted as soon as they're complete.
 package parser
 
 import (
-	"md4go/ast"
-	"md4go/renderer"
-	"md4go/stream"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/stream"
 )
 
 // Parser is the reusable parser, analogous to md4c's MD_CTX.

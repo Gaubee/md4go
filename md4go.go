@@ -18,9 +18,9 @@
 package md4go
 
 import (
-	"md4go/parser"
-	"md4go/renderer"
-	"md4go/stream"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/stream"
 )
 
 // Parser is the main entry point. It holds a reusable parse context.

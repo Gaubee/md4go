@@ -3,8 +3,8 @@ package parser
 import (
 	"bytes"
 
-	"md4go/ast"
-	"md4go/renderer"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/renderer"
 )
 
 // LineType identifies the type of a line during first-pass analysis.

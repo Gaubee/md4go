@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"md4go"
-	"md4go/extension"
-	"md4go/text"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/extension"
+	"github.com/userpro/md4go/text"
 )
 
 // TestConcurrentUse verifies that a single Markdown instance can be used safely

@@ -1,6 +1,6 @@
 package diffcheck
 
-import "md4go/parser"
+import "github.com/userpro/md4go/parser"
 
 // Flags is an alias for parser.Flags, re-exported for CLI convenience.
 type Flags = parser.Flags

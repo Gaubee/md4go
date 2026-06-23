@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"md4go"
-	"md4go/extension"
-	"md4go/html"
-	"md4go/parser"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/extension"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
 )
 
 // extSpecCase represents a single fenced example from md4c spec-*.txt files.

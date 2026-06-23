@@ -1,6 +1,6 @@
 package parser
 
-import "md4go/ast"
+import "github.com/userpro/md4go/ast"
 
 // attribute.go implements attribute building with substring type tracking.
 // Mirrors md4c md_build_attribute() (md4c.c:1508-1591).

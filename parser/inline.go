@@ -3,8 +3,8 @@ package parser
 import (
 	"bytes"
 
-	"md4go/ast"
-	"md4go/renderer"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/renderer"
 )
 
 // analyzeInlines collects and resolves inline marks for a leaf block.

@@ -1,11 +1,11 @@
 package parser
 
 // Extender is implemented by extensions to register their syntax handlers
-// with the parser at construction time. Mirrors goldmark's Extender interface.
+// with the parser at construction time.
 //
-// Unlike md4c's compile-time MD_FLAG_* bitmasks, Extender allows runtime
-// injection of custom block triggers, inline mark characters, and behavior
-// flags — enabling third-party extensions without modifying the parser core.
+// Extender allows runtime injection of custom block triggers, inline mark
+// characters, and behavior flags — enabling third-party extensions without
+// modifying the parser core.
 type Extender interface {
 	// Extend registers this extension's handlers with the parser.
 	// Called once during Parser construction, before any Parse() call.

@@ -1,8 +1,8 @@
 package parser
 
 import (
-	"md4go/ast"
-	"md4go/renderer"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/renderer"
 )
 
 // admonitionTags lists the recognized admonition type labels.

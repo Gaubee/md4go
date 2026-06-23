@@ -18,7 +18,7 @@ md4go 的测试体系覆盖以下五大方向，对应 SOP §6.1 测试矩阵：
 | 6 | **Fuzz 安全** | 任意字节流无 panic、双渲染器确定性 | `FuzzParseNoPanicNoLeak` 等 |
 | 7 | **兼容性 Flag** | 25 个 flag 正交性、Dialect 预设组合、Flag 值唯一性 | `compat_flags_test.go` |
 | 8 | **回归钉死** | I45–I62 修复的特定 bug 不复发 | `regression_*.go` |
-| 9 | **扩展集成** | `WithExtensions`/`WithFlags` API 正确组合 | `extension_integration_test.go` |
+| 9 | **扩展集成** | `WithExtensions`/`WithFlags` API 正确组合 | `integration/extension_integration_test.go` |
 
 ---
 
@@ -29,16 +29,14 @@ md4go 的测试体系覆盖以下五大方向，对应 SOP §6.1 测试矩阵：
 测试按 **被测模块** 和 **测试层级** 归属到各自目录：
 
 - **单元测试**：与被测代码同目录（`parser/`、`html/`、`text/`、`extension/`、`stream/`），直接测试模块内部逻辑
-- **集成测试**：统一放在 `integration/` 目录（`package integration_test`），通过导入 `md4go` 及子包测试全链路行为
-- **根目录**仅保留 `extension_integration_test.go`（`package md4go` 内部测试，访问未导出字段 `p.p.Flags()`，无法移到子目录）
+- **集成测试**：统一放在 `integration/` 目录（`package integration_test`），通过导入 `md4go` 及子包测试全链路行为（含 `WithExtensions`/`WithFlags` 选项 API，经公共 API 行为断言）
 
 ```
 md4go/
-├── extension_integration_test.go   # [根·内部] WithExtensions/WithFlags API (访问未导出字段)
-│
 ├── integration/                    # ══ 集成测试 (package integration_test) ══
 │   ├── spec_test.go                #   CommonMark 0.31 spec 合规 (652 example)
 │   ├── extension_spec_test.go      #   GFM/扩展 spec 合规 (spec-*.txt + regressions)
+│   ├── extension_integration_test.go # WithExtensions/WithFlags API 组合 (公共 API 行为断言)
 │   ├── pathological_test.go        #   病态输入: 无 panic + 线性时间 + 内存有界
 │   ├── fuzz_test.go                #   Fuzz: 无 panic + 双渲染器确定性
 │   ├── concurrency_test.go         #   并发安全: 多 goroutine + HTML/Plain 混合
@@ -74,8 +72,7 @@ md4go/
 
 | 目录 | 包名 | 测试层级 | 测试方向 |
 |------|------|---------|---------|
-| **根** | `md4go` (内部) | 单元 | `WithExtensions`/`WithFlags` 选项 API（访问未导出字段） |
-| **`integration/`** | `integration_test` | 集成 | spec 合规、病态输入、Fuzz、并发安全、全链路边界 |
+| **`integration/`** | `integration_test` | 集成 | spec 合规、扩展 API 组合、病态输入、Fuzz、并发安全、全链路边界 |
 | **`parser/`** | `parser_test` | 单元 | flag 行为/正交性、bug 回归、深层嵌套、强调/链接/Mark |
 | **`html/`** | `html_test` | 单元 | 实体处理、嵌套图片、highlight/spoiler 守卫、渲染 flag |
 | **`text/`** | `text_test` | 单元 | 流式一致性、内存有界、tight list 渲染 |

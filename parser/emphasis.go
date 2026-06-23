@@ -1,6 +1,6 @@
 package parser
 
-import "md4go/ast"
+import "github.com/userpro/md4go/ast"
 
 // emphasis.go implements the Rule-of-3 emphasis resolution algorithm.
 // Mirrors md4c md_analyze_emph() + md_split_emph_mark() + md_analyze_marks().

@@ -1,12 +1,10 @@
 // Package ast defines event types for the push-based parsing model.
 //
 // This package deliberately contains NO node tree — only type enums and
-// detail structs. This is the physical guarantee of the "no AST" constraint
-// inherited from md4c's architecture.
+// detail structs. This is the physical guarantee of the "no AST" constraint.
 package ast
 
 // BlockType identifies block-level document elements.
-// Mirrors MD_BLOCKTYPE in md4c.h.
 type BlockType uint8
 
 const (
@@ -32,7 +30,6 @@ const (
 )
 
 // SpanType identifies inline span elements.
-// Mirrors MD_SPANTYPE in md4c.h.
 type SpanType uint8
 
 const (
@@ -54,7 +51,6 @@ const (
 )
 
 // TextType classifies text content within a span.
-// Mirrors MD_TEXTTYPE in md4c.h.
 type TextType uint8
 
 const (
@@ -78,10 +74,9 @@ const (
 	AlignRight
 )
 
-// --- Attribute type (mirrors MD_ATTRIBUTE in md4c.h:277-282) ---
+// --- Attribute type ---
 
 // SubstrType identifies the type of a substring within an attribute value.
-// Mirrors MD_TEXTTYPE usage in MD_ATTRIBUTE substr_types.
 // Only SubstrNormal, SubstrEntity, and SubstrNullChar can appear in attributes.
 type SubstrType uint8
 
@@ -104,8 +99,6 @@ const (
 //
 //	SubOffsets[0] == 0
 //	SubOffsets[last] == len(Text)
-//
-// Mirrors MD_ATTRIBUTE in md4c.h:277-282.
 type Attribute struct {
 	Text       []byte
 	SubTypes   []SubstrType
@@ -134,7 +127,7 @@ var EmptyAttribute = Attribute{
 	SubOffsets: []int{0, 0},
 }
 
-// --- Detail structs (mirrors MD_*_DETAIL in md4c.h) ---
+// --- Detail structs ---
 
 // HeadingDetail carries the heading level (1–6) for BlockH.
 type HeadingDetail struct {
@@ -199,7 +192,6 @@ type AdmonitionDetail struct {
 }
 
 // FootnoteRefDetail carries footnote reference metadata for SpanFootnoteRef.
-// Mirrors MD_SPAN_FOOTNOTE_REF_DETAIL in md4c.h:352-357.
 type FootnoteRefDetail struct {
 	ID    uint // 1-based identifier of the referenced footnote
 	RefID uint // 1-based identifier of this reference among references to the same footnote
@@ -207,7 +199,6 @@ type FootnoteRefDetail struct {
 }
 
 // FootnoteDefDetail carries footnote definition metadata for BlockFootnoteDef.
-// Mirrors MD_BLOCK_FOOTNOTE_DEF_DETAIL in md4c.h:359-364.
 type FootnoteDefDetail struct {
 	ID       uint // 1-based identifier of this footnote
 	RefCount uint // Number of references to this footnote
@@ -215,7 +206,6 @@ type FootnoteDefDetail struct {
 }
 
 // WikilinkDetail carries wikilink metadata for SpanWikilink.
-// Mirrors MD_SPAN_WIKILINK_DETAIL in md4c.h:348-350.
 type WikilinkDetail struct {
 	Target Attribute // wikilink target (the part before |)
 }

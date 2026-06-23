@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"md4go/ast"
+	"github.com/userpro/md4go/ast"
 	"unicode"
 	"unicode/utf8"
 )

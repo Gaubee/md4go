@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"md4go"
-	"md4go/ast"
-	"md4go/extension"
-	"md4go/html"
-	"md4go/renderer"
-	"md4go/text"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/extension"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/text"
 )
 
 // convertToPlainText converts markdown to plain text for testing.

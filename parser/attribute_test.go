@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"md4go/ast"
+	"github.com/userpro/md4go/ast"
 )
 
 func TestBuildAttribute_Trivial(t *testing.T) {

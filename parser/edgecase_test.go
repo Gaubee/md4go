@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"md4go/parser"
-	"md4go/text"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/text"
 )
 
 // convertPlainText converts markdown to plain text with given flags.

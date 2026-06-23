@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"md4go/ast"
+	"github.com/userpro/md4go/ast"
 )
 
 // Block represents a block-level element in the document structure.

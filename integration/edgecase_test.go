@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"md4go"
-	"md4go/renderer"
-	"md4go/text"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/text"
 )
 
 // This file contains integration edge-case tests that exercise the root

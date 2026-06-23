@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"md4go/html"
-	"md4go/parser"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
 )
 
 // renderHTML converts markdown to HTML using the given flags.

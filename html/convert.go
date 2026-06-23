@@ -7,8 +7,8 @@ package html
 import (
 	"io"
 
-	"md4go/parser"
-	"md4go/renderer"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/renderer"
 )
 
 // Option configures the HTML conversion.
@@ -68,7 +68,6 @@ func NewHTML(w io.Writer) *HTML {
 }
 
 // NewWithFlags creates an HTML renderer with specific renderer flags.
-// Mirrors md4c md_html() renderer_flags parameter (md4c-html.c:617-637).
 func NewWithFlags(w io.Writer, flags Flags) *HTML {
 	h := &HTML{w: renderer.NewBufWriter(w), flags: flags}
 	h.xhtml = flags&FlagXHTML != 0
@@ -77,12 +76,11 @@ func NewWithFlags(w io.Writer, flags Flags) *HTML {
 }
 
 // Flags is a bitmask of HTML renderer behavior switches.
-// Mirrors MD_HTML_FLAG_* values from md4c-html.h.
 type Flags uint32
 
 const (
-	FlagDebug            Flags = 0x0001 // MD_HTML_FLAG_DEBUG
-	FlagVerbatimEntities Flags = 0x0002 // MD_HTML_FLAG_VERBATIM_ENTITIES
-	FlagSkipUTF8BOM      Flags = 0x0004 // MD_HTML_FLAG_SKIP_UTF8_BOM
-	FlagXHTML            Flags = 0x0008 // MD_HTML_FLAG_XHTML
+	FlagDebug            Flags = 0x0001
+	FlagVerbatimEntities Flags = 0x0002
+	FlagSkipUTF8BOM      Flags = 0x0004
+	FlagXHTML            Flags = 0x0008
 )

@@ -6,10 +6,10 @@ import (
 	"runtime"
 	"testing"
 
-	"md4go/html"
-	"md4go/parser"
-	"md4go/stream"
-	"md4go/text"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/stream"
+	"github.com/userpro/md4go/text"
 )
 
 // TestStreamEqualsFull verifies that Convert ([]byte) and ConvertStream

@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
-	"md4go/parser"
-	"md4go/text"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/text"
 )
 
 // Md4goEngine uses the local md4go library.

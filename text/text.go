@@ -7,8 +7,8 @@ package text
 import (
 	"io"
 
-	"md4go/parser"
-	"md4go/stream"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/stream"
 )
 
 // Option configures the text conversion.

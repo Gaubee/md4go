@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"md4go"
-	"md4go/html"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/html"
 )
 
 // specCase represents a single CommonMark spec example.

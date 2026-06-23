@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"md4go/extension"
-	"md4go/html"
-	"md4go/parser"
-	"md4go/renderer"
-	"md4go/text"
+	"github.com/userpro/md4go/extension"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/text"
 )
 
 // Ensure renderer.Renderer interface satisfaction

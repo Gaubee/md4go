@@ -1,5 +1,5 @@
-// Package renderer defines the Renderer interface — the Go equivalent of
-// md4c's MD_PARSER callback set.
+// Package renderer defines the Renderer interface — the contract between
+// the parser and rendering targets.
 //
 // A Renderer consumes parse events (EnterBlock/LeaveBlock/EnterSpan/LeaveSpan/Text)
 // and produces output in its target format. Multiple renderers (PlainText, HTML, …)
@@ -11,10 +11,10 @@
 package renderer
 
 import (
-	"md4go/ast"
+	"github.com/userpro/md4go/ast"
 )
 
-// Renderer is the core abstraction — equivalent to MD_PARSER callbacks in md4c.
+// Renderer is the core abstraction between the parser and rendering targets.
 // Every rendering target (PlainText, HTML, …) implements this interface.
 //
 // Users implement Renderer to consume parse events from md4go.Parser.

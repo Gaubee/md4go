@@ -5,7 +5,7 @@ import (
 	// collision with the md4go/html package.
 	stdhtml "html"
 
-	"md4go/parser"
+	"github.com/userpro/md4go/parser"
 )
 
 // compatConfig pre-computes renderer-level compatibility behavior decisions

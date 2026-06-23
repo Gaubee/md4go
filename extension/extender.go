@@ -1,10 +1,9 @@
-// Package extension provides goldmark-style runtime extensions for the md4go
-// parser.
+// Package extension provides runtime extensions for the md4go parser.
 //
 // Each extension implements parser.Extender and registers its syntax handlers
 // (block triggers, mark characters, flags) with the parser at construction time.
-// This replaces md4c's compile-time MD_FLAG_* bitmask approach with runtime
-// injection, enabling third-party extensions without modifying the parser core.
+// This runtime injection mechanism enables third-party extensions without
+// modifying the parser core.
 //
 // Usage:
 //

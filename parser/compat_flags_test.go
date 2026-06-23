@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"md4go/html"
-	"md4go/parser"
-	"md4go/text"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/text"
 )
 
 // convert is a test helper that converts markdown to plain text with given flags.

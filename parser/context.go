@@ -1,6 +1,6 @@
 package parser
 
-import "md4go/ast"
+import "github.com/userpro/md4go/ast"
 
 // context holds per-parse mutable state, analogous to md4c's MD_CTX.
 //

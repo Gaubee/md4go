@@ -1,6 +1,5 @@
 // Package stream provides the LineSource abstraction for incremental line input.
 //
-// md4c's first pass is a while(off < size) line loop — inherently incremental.
 // LineSource abstracts "give me the next line" so that Convert ([]byte) and
 // ConvertStream (io.Reader) share the same parsing core.
 package stream

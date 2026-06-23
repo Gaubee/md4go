@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"md4go/ast"
-	"md4go/renderer"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/renderer"
 )
 
 // HTML is the HTML renderer — used for spec compliance validation.

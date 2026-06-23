@@ -3,18 +3,18 @@ package text
 import (
 	"io"
 
-	"md4go/ast"
-	"md4go/parser"
 	"strconv"
 
-	"md4go/renderer"
+	"github.com/userpro/md4go/ast"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/renderer"
 )
 
 // PlainText renders parse events as plain text.
 // Emphasis, links, and other spans are stripped to their textual content.
 //
-// The separator state machine (needBlank/needNL) mirrors md4c's
-// PlainCtx in md4c-plain/main.c.
+// The separator state machine (needBlank/needNL) controls block-level
+// separators between paragraphs, list items, and other block elements.
 type PlainText struct {
 	w           *renderer.BufWriter
 	compat      compatConfig // pre-computed compatibility behavior decisions

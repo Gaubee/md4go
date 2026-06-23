@@ -6,9 +6,9 @@ import (
 	"io"
 	"os"
 
-	"md4go/html"
-	"md4go/parser"
-	"md4go/text"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/text"
 )
 
 func main() {
@@ -17,7 +17,7 @@ func main() {
 	compat := flag.String("compat", "none", "compatibility mode: none, goldmark")
 	flag.Parse()
 
-	// Default to GitHub dialect — mirrors md4c's MD_DIALECT_GITHUB default.
+	// Default to GitHub dialect.
 	textFlags := parser.DialectGitHub
 	htmlFlags := parser.DialectGitHub
 

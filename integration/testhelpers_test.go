@@ -3,9 +3,9 @@ package integration_test
 import (
 	"bytes"
 
-	"md4go"
-	"md4go/html"
-	"md4go/text"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/text"
 )
 
 // mdConvertPlain converts src to plain text using the given parser.

@@ -3,7 +3,7 @@ package parser
 import (
 	"bytes"
 
-	"md4go/ast"
+	"github.com/userpro/md4go/ast"
 )
 
 // refdef.go implements link reference definition and footnote definition detection.

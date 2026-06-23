@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"md4go"
-	"md4go/extension"
-	"md4go/html"
-	"md4go/parser"
-	"md4go/text"
+	"github.com/userpro/md4go"
+	"github.com/userpro/md4go/extension"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/text"
 )
 
 // pathologicalCase represents a pathological input test case.

@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"testing"
 
-	"md4go/html"
-	"md4go/parser"
-	"md4go/renderer"
-	"md4go/text"
+	"github.com/userpro/md4go/html"
+	"github.com/userpro/md4go/parser"
+	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/text"
 )
 
 // --- Code span tests ---
