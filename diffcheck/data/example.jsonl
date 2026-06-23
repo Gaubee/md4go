@@ -1,0 +1,13 @@
+{"data":{"content":"# Hello World\n\nThis is a **basic** markdown document with *inline* emphasis.\n"}}
+{"data":{"content":"## Code Blocks\n\nInline `code` and fenced block:\n\n```go\nfunc main() {\n    fmt.Println(\"hello\")\n}\n```\n"}}
+{"data":{"content":"## Lists\n\nUnordered:\n- item one\n- item two\n  - nested item\n\nOrdered:\n1. first\n2. second\n"}}
+{"data":{"content":"## Table (GFM)\n\n| Name  | Age | City      |\n|-------|-----|-----------|\n| Alice | 30  | Beijing   |\n| Bob   | 25  | Shanghai  |\n"}}
+{"data":{"content":"## Links and Images\n\nA [link](https://example.com) and an image:\n\n![alt text](image.png)\n\nReference link: [ref][1]\n\n[1]: https://example.org\n"}}
+{"data":{"content":"## Blockquote\n\n> This is a quote.\n> > Nested quote line.\n> - list inside quote\n"}}
+{"data":{"content":"## HTML Block\n\n<div class=\"note\">\n  Raw HTML content is preserved by md4go/md4c\n  but stripped by goldmark.\n</div>\n"}}
+{"data":{"content":"## Task List & Strikethrough (GFM)\n\n- [x] completed task\n- [ ] pending task\n\n~~deleted text~~\n"}}
+{"data":{"content":"## Entities & Escapes\n\nLiteral: &amp; &lt; &gt; &copy; &#65;\n\nEscaped: \\*not bold\\* \\#not heading\n"}}
+{"data":{"content":"## Edge Cases\n\nHard break (two trailing spaces)  \nNext line.\n\nBackslash hard break\\\nanother line.\n\nEmpty structures: ** ~~ __ `` []()\n"}}
+{"data":{"content":"中文标题\n\n这是一段包含**加粗**和*斜体*的中文段落。\n\n- 列表项一\n- 列表项二\n\n> 引用块内容\n"}}
+{"data":{"content":"## Mixed Content\n\n# Title\n\nParagraph with **bold**, *italic*, `code`, and a [link](url).\n\n- list item\n\n```\nfenced code\n```\n\n> blockquote\n\n![img](pic.png)\n"}}
+{"data":{"content":"# Unclosed structures\n\n```\nno closing fence\n\n**unclosed emphasis\n\n[unclosed link](\n\nThese test parser robustness on truncated input.\n"}}

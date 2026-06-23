@@ -1,0 +1,5 @@
+dev_docs
+diffcheck/csrc/md4c-plain
+diffcheck/data/testdata*
+diffcheck/diffcheck
+DIFF_REPORT.md
