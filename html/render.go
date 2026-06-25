@@ -16,22 +16,15 @@ import (
 // I17: Full entity translation, URL percent-encoding, tight lists, missing spans.
 // I37: List content buffering for correct tight/loose determination.
 type HTML struct {
-	w        *renderer.BufWriter
-	escape   [256]bool
-	urlEsc   [256]bool // URL percent-encoding map
-	imgDepth int
-	xhtml    bool
-	flags    Flags // I36: C-40/C-41 — renderer flags (VERBATIM_ENTITIES, SKIP_UTF8_BOM, etc.)
+	w          *renderer.BufWriter
+	escape     [256]bool // text content escape table
+	escapeAttr [256]bool // attribute value escape table (always includes ")
+	urlEsc     [256]bool // URL percent-encoding map
+	imgDepth   int
+	xhtml      bool
+	flags      RenderFlags
 
 	// I37: List content buffering for tight/loose detection.
-	// Problem: A list's tight/loose status can only be determined after
-	// seeing blank lines between items, but the first items may already
-	// have been emitted. md4c solves this with a two-pass architecture;
-	// we solve it by buffering list content and processing it at LeaveBlock time.
-	//
-	// listBufs: stack of buffers, one per nesting level of list.
-	// When inside a list, all output goes to the top buffer instead of w.
-	// When the list ends, we strip <p> tags if tight, then write to parent.
 	listBufs []*bytes.Buffer
 
 	// imgDetail holds the image detail for the current image span.
@@ -221,15 +214,25 @@ func NewHTMLWithWriter(w *renderer.BufWriter) *HTML {
 }
 
 // initEscapeMaps precomputes the HTML and URL escape character tables.
-// Mirrors md4c-html.c escape_map initialization (lines 617-624).
 func (h *HTML) initEscapeMaps() {
-	// HTML escape: " & ' < > — mirrors md4c-html.c: strchr("\"&'<>", ch)
-	for _, c := range []byte("\"&'<>") {
-		h.escape[c] = true
+	if h.flags&FlagNoXHTMLEscaping != 0 {
+		// goldmark-compatible: text content escapes only & < >
+		for _, c := range []byte("&<>") {
+			h.escape[c] = true
+		}
+		// Attribute values also escape " (needed for "-delimited attrs)
+		for _, c := range []byte("\"&<>") {
+			h.escapeAttr[c] = true
+		}
+	} else {
+		// Default: XHTML-safe — escapes " & ' < > (matches md4c-html.c)
+		for _, c := range []byte("\"&'<>") {
+			h.escape[c] = true
+			h.escapeAttr[c] = true
+		}
 	}
 
 	// URL percent-encoding: non-alphanumeric chars not in safe set.
-	// Mirrors md4c-html.c: !ISALNUM(ch) && strchr("~-_.+!*(),%#@?=;:/$", ch) == NULL
 	safeURL := "~-_.+!*(),%#@?=;:/$"
 	for i := 0; i < 256; i++ {
 		c := byte(i)
@@ -770,24 +773,25 @@ func (h *HTML) writeURLEscaped(url []byte) {
 	}
 }
 
-// --- HTML Escaping (mirrors md4c-html.c render_html_escaped) ---
+// --- HTML Escaping ---
 
-func (h *HTML) writeEscaped(text []byte) error {
+// writeEscapedWith escapes text using the given escape table.
+// Characters in the table are encoded as HTML entities.
+func (h *HTML) writeEscapedWith(text []byte, table *[256]bool) error {
 	beg := 0
 	off := 0
 	size := len(text)
 
 	for {
 		// Fast skip: 4 characters at a time (loop unrolling).
-		// Mirrors md4c-html.c:96-98 render_html_escaped optimization.
 		for off+3 < size &&
-			!h.escape[text[off]] &&
-			!h.escape[text[off+1]] &&
-			!h.escape[text[off+2]] &&
-			!h.escape[text[off+3]] {
+			!table[text[off]] &&
+			!table[text[off+1]] &&
+			!table[text[off+2]] &&
+			!table[text[off+3]] {
 			off += 4
 		}
-		for off < size && !h.escape[text[off]] {
+		for off < size && !table[text[off]] {
 			off++
 		}
 
@@ -815,6 +819,11 @@ func (h *HTML) writeEscaped(text []byte) error {
 		beg = off
 	}
 	return nil
+}
+
+// writeEscaped escapes text for HTML text content.
+func (h *HTML) writeEscaped(text []byte) error {
+	return h.writeEscapedWith(text, &h.escape)
 }
 
 // --- Block rendering helpers ---
@@ -968,7 +977,7 @@ func (h *HTML) renderOpenImg(detail any) {
 }
 
 func (h *HTML) writeEscapedBytes(text []byte) {
-	_ = h.writeEscaped(text)
+	_ = h.writeEscapedWith(text, &h.escapeAttr)
 }
 
 func (h *HTML) renderOpenWikilink(detail any) {

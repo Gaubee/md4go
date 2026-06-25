@@ -17,7 +17,7 @@ type Option func(*config)
 type config struct {
 	flags     parser.Flags
 	extenders []parser.Extender
-	rFlags    Flags
+	rFlags    RenderFlags
 	skipBOM   bool
 }
 
@@ -32,7 +32,7 @@ func WithExtensions(exts ...parser.Extender) Option {
 }
 
 // WithRendererFlags sets HTML renderer flags.
-func WithRendererFlags(f Flags) Option {
+func WithRendererFlags(f RenderFlags) Option {
 	return func(c *config) { c.rFlags |= f }
 }
 
@@ -49,6 +49,10 @@ func Convert(src []byte, w io.Writer, opts ...Option) error {
 		if src[0] == 0xEF && src[1] == 0xBB && src[2] == 0xBF {
 			src = src[3:]
 		}
+	}
+	// Map parser-level flag to renderer flag
+	if cfg.flags&parser.FlagNoXHTMLEntityEncoding != 0 {
+		cfg.rFlags |= FlagNoXHTMLEscaping
 	}
 	p := parser.New(cfg.flags, cfg.extenders...)
 	h := NewWithFlags(w, cfg.rFlags)
@@ -68,19 +72,20 @@ func NewHTML(w io.Writer) *HTML {
 }
 
 // NewWithFlags creates an HTML renderer with specific renderer flags.
-func NewWithFlags(w io.Writer, flags Flags) *HTML {
+func NewWithFlags(w io.Writer, flags RenderFlags) *HTML {
 	h := &HTML{w: renderer.NewBufWriter(w), flags: flags}
 	h.xhtml = flags&FlagXHTML != 0
 	h.initEscapeMaps()
 	return h
 }
 
-// Flags is a bitmask of HTML renderer behavior switches.
-type Flags uint32
+// RenderFlags is a bitmask of HTML renderer behavior switches.
+type RenderFlags uint32
 
 const (
-	FlagDebug            Flags = 0x0001
-	FlagVerbatimEntities Flags = 0x0002
-	FlagSkipUTF8BOM      Flags = 0x0004
-	FlagXHTML            Flags = 0x0008
+	FlagDebug            RenderFlags = 0x0001
+	FlagVerbatimEntities RenderFlags = 0x0002
+	FlagSkipUTF8BOM      RenderFlags = 0x0004
+	FlagXHTML            RenderFlags = 0x0008
+	FlagNoXHTMLEscaping  RenderFlags = 0x0010
 )

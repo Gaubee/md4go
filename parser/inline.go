@@ -7,33 +7,35 @@ import (
 	"github.com/userpro/md4go/renderer"
 )
 
-// analyzeInlines collects and resolves inline marks for a leaf block.
-// Mirrors md4c md_analyze_inlines() — the three-phase inline pipeline.
+// processBlockInlines runs the full inline pipeline on blockText:
+// collectMarks → analyzeMarks → resolveBrackets → analyzeLinkContents → processInlines.
 //
-// Phase 1: collectMarks (in mark.go) — scan block text for potential marks
-// Phase 2: analyzeMarks("[]!") + resolveBrackets — link/image resolution
-// Phase 3: analyzeLinkContents — emphasis/entity/extension resolution
+// blockText is assembled once by the caller, eliminating the previous double
+// allocation where analyzeInlines and processInlines each called assembleBlockText.
 //
-// The order is critical and must not be changed (md4c §5.4).
-func (p *Parser) analyzeInlines(ctx *context, b *Block) {
-	// Phase 1: Assemble block text and collect marks
-	blockText := p.assembleBlockText(ctx, b)
+// Mirrors md4c md_analyze_inlines() + md_process_inlines() — the three-phase
+// inline pipeline (md4c §5.4). The order is critical and must not be changed.
+func (p *Parser) processBlockInlines(ctx *context, blockText []byte, r renderer.Renderer) {
+	// Phase 1: collect marks
 	collectMarks(&ctx.stk, blockText, &p.markChars, p.flags)
 
 	// Phase 2: Bracket spans — links, images, footnotes
 	// Mirrors md4c md_analyze_marks("[]!") + md_resolve_brackets()
-	ctx.stk.analyzeMarks(blockText, []byte("[]!"))
+	ctx.stk.analyzeMarks(blockText)
 	ctx.stk.resolveBrackets(blockText, p.flags)
 
 	// Phase 3: Emphasis, entities, and extension marks (link contents analysis)
 	// Mirrors md4c md_analyze_link_contents() (md4c.c:4656-4699).
 	ctx.stk.analyzeLinkContents(blockText, 0, len(ctx.stk.marks), p.flags)
+
+	// Phase 4: Emit inline events by traversing resolved marks.
+	// Mirrors md4c md_process_inlines().
+	p.processInlines(ctx, blockText, r)
 }
 
 // processInlines emits inline events for a leaf block by traversing
 // the resolved marks. Mirrors md4c md_process_inlines().
-func (p *Parser) processInlines(ctx *context, b *Block, r renderer.Renderer) {
-	blockText := p.assembleBlockText(ctx, b)
+func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Renderer) {
 	marks := ctx.stk.marks
 
 	// If no marks (or only the sentinel), emit raw text.
@@ -135,16 +137,26 @@ func (p *Parser) processInlines(ctx *context, b *Block, r renderer.Renderer) {
 				}
 				// Emphasis/strong emphasis.
 				// Mirrors md4c md_process_inlines() case '*','_' (md4c.c:4829-4866).
+				// Inlined from resolveEmphSpanType to eliminate heap allocation.
+				// Opener: odd → <em> first, then <strong> pairs.
+				// Closer: <strong> pairs first, then <em> if odd.
 				markLen := m.End - m.Beg
 				if m.Flags&markOpener != 0 {
-					spans := resolveEmphSpanType(markLen, true)
-					for _, s := range spans {
-						_ = r.EnterSpan(s, nil)
+					if markLen%2 == 1 {
+						_ = r.EnterSpan(ast.SpanEm, nil)
+						markLen--
+					}
+					for markLen >= 2 {
+						_ = r.EnterSpan(ast.SpanStrong, nil)
+						markLen -= 2
 					}
 				} else if m.Flags&markCloser != 0 {
-					spans := resolveEmphSpanType(markLen, false)
-					for _, s := range spans {
-						_ = r.LeaveSpan(s, nil)
+					for markLen >= 2 {
+						_ = r.LeaveSpan(ast.SpanStrong, nil)
+						markLen -= 2
+					}
+					if markLen == 1 {
+						_ = r.LeaveSpan(ast.SpanEm, nil)
 					}
 				}
 				off = m.End
@@ -489,6 +501,29 @@ func (p *Parser) processInlines(ctx *context, b *Block, r renderer.Renderer) {
 	}
 }
 
+// assembleTextFromLines joins lines with '\n', producing a single byte slice.
+// The returned slice is a new allocation (not a view into input)
+// because block lines may come from different parts of the input.
+func assembleTextFromLines(lines []Line) []byte {
+	if len(lines) == 0 {
+		return nil
+	}
+	size := 0
+	for _, ln := range lines {
+		size += len(ln.Text)
+	}
+	size += len(lines) - 1 // newlines between lines
+
+	result := make([]byte, 0, size)
+	for i, ln := range lines {
+		if i > 0 {
+			result = append(result, '\n')
+		}
+		result = append(result, ln.Text...)
+	}
+	return result
+}
+
 // assembleBlockText joins the lines of a leaf block with '\n'.
 // The returned slice is a new allocation (not a view into ctx.src)
 // because block lines may come from different parts of the input.
@@ -501,22 +536,7 @@ func (p *Parser) assembleBlockText(ctx *context, b *Block) []byte {
 	if b.NLines == 0 {
 		return nil
 	}
-	size := 0
-	for i := 0; i < b.NLines; i++ {
-		ln := ctx.blk.lines[b.LineIdx+i]
-		size += len(ln.Text)
-	}
-	size += b.NLines - 1 // newlines between lines
-
-	result := make([]byte, 0, size)
-	for i := 0; i < b.NLines; i++ {
-		if i > 0 {
-			result = append(result, '\n')
-		}
-		ln := ctx.blk.lines[b.LineIdx+i]
-		result = append(result, ln.Text...)
-	}
-	return result
+	return assembleTextFromLines(ctx.blk.lines[b.LineIdx : b.LineIdx+b.NLines])
 }
 
 // emitTextWithBreaks emits text segments, splitting at '\n' boundaries.
@@ -567,13 +587,14 @@ func (p *Parser) emitTextWithBreaks(r renderer.Renderer, text []byte, enforceHar
 				// Mirrors md4c md_process_inlines() (md4c.c:5085-5096):
 				// Hard breaks are only checked for MD_TEXT_NORMAL (not code or
 				// LaTeX math), and require the last two trailing chars to be
-				// spaces (tabs don't count). Uses bytes.HasSuffix to match the
-				// C check: CH(off-2) == ' ' && CH(off-1) == ' '.
+				// spaces (tabs don't count). Direct byte comparison replaces
+				// bytes.HasSuffix to avoid per-newline slice allocation.
 				// I29: FlagHardSoftBreaks — all soft breaks become hard.
 				isHardBreak := false
 				if !latexMath {
+					segLen := i - start
 					isHardBreak = enforceHardBreak ||
-						bytes.HasSuffix(text[start:i], []byte("  ")) ||
+						(segLen >= 2 && text[i-2] == ' ' && text[i-1] == ' ') ||
 						p.flags&FlagHardSoftBreaks != 0
 				}
 				if isHardBreak {
@@ -596,6 +617,14 @@ func (p *Parser) emitTextWithBreaks(r renderer.Renderer, text []byte, enforceHar
 // code block content, HTML block content, code span content, etc.
 // (Normal text handles NULLs via the mark system in collectMarks case 0.)
 func (p *Parser) textWithNullReplacement(r renderer.Renderer, textType ast.TextType, text []byte) {
+	// Fast path: no NULL characters (common case for code/HTML blocks).
+	// bytes.IndexByte is SIMD-optimized in Go runtime, far faster than
+	// the byte-by-byte scan below for the common no-NULL case.
+	if bytes.IndexByte(text, 0) < 0 {
+		_ = r.Text(textType, text)
+		return
+	}
+	// Slow path: split at NULL boundaries
 	off := 0
 	for off < len(text) {
 		// Find next NULL or end

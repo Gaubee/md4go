@@ -29,17 +29,15 @@ func RunCase(ctx context.Context, engines []Engine, tc TestCase, mode NormalizeM
 
 	// Pairwise comparisons
 	if len(engines) >= 2 {
-		pairs := [][2]int{{0, 1}}
-		if len(engines) >= 3 {
-			pairs = [][2]int{{0, 1}, {0, 2}, {1, 2}}
-		}
-		for i, pair := range pairs {
-			a, b := engines[pair[0]], engines[pair[1]]
-			cr.Pairs[i] = Compare(
-				a.Name(), cr.Outputs[a.Name()],
-				b.Name(), cr.Outputs[b.Name()],
-				mode,
-			)
+		for i := 0; i < len(engines); i++ {
+			for j := i + 1; j < len(engines); j++ {
+				a, b := engines[i], engines[j]
+				cr.Pairs = append(cr.Pairs, Compare(
+					a.Name(), cr.Outputs[a.Name()],
+					b.Name(), cr.Outputs[b.Name()],
+					mode,
+				))
+			}
 		}
 	}
 

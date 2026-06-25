@@ -332,27 +332,16 @@ func (p *Parser) emitTableRow(ctx *context, line []byte, colCount int, aligns []
 
 // processCellInline processes a table cell's text as inline content.
 // Uses the mark pipeline (collectMarks + analyzeMarks + resolveBrackets +
-// analyzeLinkContents + processInlines) on the cell text.
+// analyzeLinkContents + processInlines) on the cell text directly.
 //
-// The cell text is temporarily added to ctx.blk.lines so that
-// assembleBlockText can read it. The line is cleaned up by compact()
-// after the table block is fully emitted.
+// cellText is passed directly as blockText — no temp block or ctx.blk.lines
+// mutation is needed, since processBlockInlines accepts pre-assembled text.
 func (p *Parser) processCellInline(ctx *context, cellText []byte, r renderer.Renderer) {
-	lineIdx := len(ctx.blk.lines)
-	ctx.blk.lines = append(ctx.blk.lines, Line{Text: cellText})
-
-	tempBlock := &Block{
-		Type:    ast.BlockP,
-		NLines:  1,
-		LineIdx: lineIdx,
-	}
-
 	// Reset marks for this cell
 	ctx.stk.reset()
 
-	// Process inline content
-	p.analyzeInlines(ctx, tempBlock)
-	p.processInlines(ctx, tempBlock, r)
+	// Process inline content — cellText is the block text (single line)
+	p.processBlockInlines(ctx, cellText, r)
 
 	// Reset marks after processing
 	ctx.stk.reset()

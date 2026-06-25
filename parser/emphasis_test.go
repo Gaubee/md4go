@@ -2,9 +2,17 @@ package parser
 
 import (
 	"testing"
-
-	"github.com/userpro/md4go/ast"
 )
+
+// analyzeMarksWithFilter is a test helper that calls analyzeMarksRange
+// with a filter built from the given characters.
+func analyzeMarksWithFilter(ms *markStacks, blockText []byte, filterChars string) {
+	var filter [256]bool
+	for _, c := range []byte(filterChars) {
+		filter[c] = true
+	}
+	ms.analyzeMarksRange(blockText, 0, len(ms.marks), filter, [256]bool{}, false, 0)
+}
 
 // --- splitEmphMark tests ---
 
@@ -70,7 +78,7 @@ func TestAnalyzeEmphSimpleEm(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("*foo*"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("*foo*"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("*foo*"), "*_")
 
 	// First * should be resolved as opener, second as closer
 	opener := findMarkByCh(ms, '*', 0)
@@ -95,7 +103,7 @@ func TestAnalyzeEmphStrong(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("**foo**"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("**foo**"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("**foo**"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
 	closer := findMarkByCh(ms, '*', 1)
@@ -116,7 +124,7 @@ func TestAnalyzeEmphStrongEm(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("***foo***"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("***foo***"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("***foo***"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
 	closer := findMarkByCh(ms, '*', 1)
@@ -140,7 +148,7 @@ func TestAnalyzeEmphSplit(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("***foo**"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("***foo**"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("***foo**"), "*_")
 
 	// The closer ** should be resolved
 	closer := findMarkByCh(ms, '*', 1)
@@ -157,7 +165,7 @@ func TestAnalyzeEmphUnderscore(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("_foo_"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("_foo_"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("_foo_"), "*_")
 
 	opener := findMarkByCh(ms, '_', 0)
 	closer := findMarkByCh(ms, '_', 1)
@@ -178,7 +186,7 @@ func TestAnalyzeEmphIntraWordUnderscore(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("foo_bar"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("foo_bar"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("foo_bar"), "*_")
 
 	// No marks should be resolved as emphasis
 	for _, m := range ms.marks {
@@ -195,7 +203,7 @@ func TestAnalyzeEmphRuleOf3(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("***bar***"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("***bar***"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("***bar***"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
 	closer := findMarkByCh(ms, '*', 1)
@@ -212,7 +220,7 @@ func TestAnalyzeEmphUnresolved(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("*foo"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("*foo"), []byte("*_"))
+	analyzeMarksWithFilter(ms, []byte("*foo"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
 	if opener == nil {
@@ -231,7 +239,7 @@ func TestAnalyzeTildeStrikethrough(t *testing.T) {
 	ms.reset()
 	mc := buildMarkChars(FlagStrikethrough)
 	collectMarks(ms, []byte("~~strike~~"), &mc, FlagStrikethrough)
-	ms.analyzeMarks([]byte("~~strike~~"), []byte("~"))
+	analyzeMarksWithFilter(ms, []byte("~~strike~~"), "~")
 
 	opener := findMarkByCh(ms, '~', 0)
 	closer := findMarkByCh(ms, '~', 1)
@@ -250,7 +258,7 @@ func TestAnalyzeEntity(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("&amp;"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("&amp;"), []byte("&"))
+	analyzeMarksWithFilter(ms, []byte("&amp;"), "&")
 
 	ampMark := findMarkByCh(ms, '&', 0)
 	if ampMark == nil {
@@ -266,7 +274,7 @@ func TestAnalyzeEntityInvalid(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	collectMarks(ms, []byte("&invalid"), &markCharMap, 0)
-	ms.analyzeMarks([]byte("&invalid"), []byte("&"))
+	analyzeMarksWithFilter(ms, []byte("&invalid"), "&")
 
 	ampMark := findMarkByCh(ms, '&', 0)
 	if ampMark == nil {
@@ -277,38 +285,10 @@ func TestAnalyzeEntityInvalid(t *testing.T) {
 	}
 }
 
-// --- resolveEmphSpanType tests ---
-
-func TestResolveEmphSpanType(t *testing.T) {
-	tests := []struct {
-		markLen  int
-		isOpener bool
-		want     []ast.SpanType
-	}{
-		{1, true, []ast.SpanType{ast.SpanEm}},
-		{2, true, []ast.SpanType{ast.SpanStrong}},
-		{3, true, []ast.SpanType{ast.SpanEm, ast.SpanStrong}},
-		{4, true, []ast.SpanType{ast.SpanStrong, ast.SpanStrong}},
-		{5, true, []ast.SpanType{ast.SpanEm, ast.SpanStrong, ast.SpanStrong}},
-		{1, false, []ast.SpanType{ast.SpanEm}},
-		{2, false, []ast.SpanType{ast.SpanStrong}},
-		{3, false, []ast.SpanType{ast.SpanStrong, ast.SpanEm}},
-		{4, false, []ast.SpanType{ast.SpanStrong, ast.SpanStrong}},
-		{5, false, []ast.SpanType{ast.SpanStrong, ast.SpanStrong, ast.SpanEm}},
-	}
-	for _, tt := range tests {
-		got := resolveEmphSpanType(tt.markLen, tt.isOpener)
-		if len(got) != len(tt.want) {
-			t.Errorf("resolveEmphSpanType(%d, %v) = %v, want %v", tt.markLen, tt.isOpener, got, tt.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tt.want[i] {
-				t.Errorf("resolveEmphSpanType(%d, %v)[%d] = %v, want %v", tt.markLen, tt.isOpener, i, got[i], tt.want[i])
-			}
-		}
-	}
-}
+// --- resolveEmphSpanType tests (now inlined in processInlines) ---
+// See emphasis_integration_test.go (parser_test package) for the
+// end-to-end TestEmphSpanNestingOrder test that verifies span nesting
+// order through the full parse→HTML pipeline.
 
 // --- analyzeMarks integration tests ---
 
@@ -338,7 +318,7 @@ func TestAnalyzeMarksMixedEmphasis(t *testing.T) {
 			ms := &markStacks{}
 			ms.reset()
 			collectMarks(ms, []byte(tt.input), &markCharMap, 0)
-			ms.analyzeMarks([]byte(tt.input), []byte("*_"))
+			analyzeMarksWithFilter(ms, []byte(tt.input), "*_")
 
 			resolvedPairs := 0
 			for i := range ms.marks {
@@ -430,7 +410,7 @@ func TestUnicodeFlankPunctuation(t *testing.T) {
 		ms := &markStacks{}
 		ms.reset()
 		collectMarks(ms, []byte(input), &markCharMap, 0)
-		ms.analyzeMarks([]byte(input), []byte("*"))
+		analyzeMarksWithFilter(ms, []byte(input), "*")
 
 		// No * should be resolved as both opener and closer
 		for i := range ms.marks {

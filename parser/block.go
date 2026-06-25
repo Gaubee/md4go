@@ -540,18 +540,29 @@ func (p *Parser) analyzeLine(ctx *context, line []byte, pivot *lineAnalysis) lin
 		return la
 	}
 
-	// 10. Table continuation: if pivot is LineTable, any non-blank line at the
-	// same container level is a table row. Mirrors md4c.c:6783-6786.
-	// BUGFIX: Must use piv (effective pivot) instead of pivot (original parameter).
-	// After a container mark is detected in step 9, piv is set to dummyBlankLine,
-	// but pivot still holds the original value. Using pivot would incorrectly
-	// classify lines like "* hello" after a table as table rows instead of
-	// list items. md4c uses the same pivot_line variable throughout, which gets
-	// overwritten to &md_dummy_blank_line.
-	if piv.lineType == LineTable && la.nParents == ctx.nContainers() {
-		la.lineType = LineTable
-		la.content = line[off:]
-		return la
+	// 10. Table continuation.
+	tableContMatch := la.nParents == ctx.nContainers()
+	if !tableContMatch && p.flags&FlagTableInterruptParagraph != 0 &&
+		piv.lineType == LineTable && la.nBrothers+la.nChildren == 0 {
+		tableContMatch = true
+	}
+
+	if piv.lineType == LineTable && tableContMatch {
+		// FlagTableInterruptByHeaders: per GFM spec, a table is broken at
+		// the start of any block-level structure (ATX heading, fenced code,
+		// HTML block). HR and container marks are handled in steps 5-9.
+		interrupted := p.flags&FlagTableInterruptByHeaders != 0 &&
+			indentCol < codeIndent && off < len(line) &&
+			canInterruptTable(line[off:], p.flags)
+
+		if !interrupted {
+			la.lineType = LineTable
+			la.content = line[off:]
+			if la.nParents != ctx.nContainers() {
+				la.nParents = ctx.nContainers()
+			}
+			return la
+		}
 	}
 
 	// 11. Trigger table dispatch for leaf block types (ATX, fenced code, HTML)
@@ -578,22 +589,52 @@ func (p *Parser) analyzeLine(ctx *context, line []byte, pivot *lineAnalysis) lin
 	}
 
 	// 12. Table underline check
+	//
+	// C-05: When FlagTableInterruptParagraph is set (part of GoldmarkCompat),
+	// also allow table detection during lazy continuation — i.e., when the
+	// paragraph is continuing inside a container (list/blockquote) without
+	// re-indentation. goldmark's paragraph transformer detects tables
+	// regardless of container nesting, so we must relax the n_parents check
+	// for lazy continuation cases.
+	//
+	// At this point, la.nParents has NOT yet been updated for lazy
+	// continuation (that happens in step 15 below). So we check the lazy
+	// continuation precondition here: pivot is text, and no brother/child
+	// container was found in steps 7/9. If so, treat the line as if it's at
+	// the current container level (matching what step 15 would set).
+	parentMatch := la.nParents == ctx.nContainers()
+	if !parentMatch && p.flags&FlagTableInterruptParagraph != 0 &&
+		pivot.lineType == LineText && la.nBrothers+la.nChildren == 0 {
+		parentMatch = true
+	}
+
 	if p.flags&FlagTables != 0 && pivot.lineType == LineText &&
 		indentCol < codeIndent && off < len(line) &&
 		(line[off] == '|' || line[off] == '-' || line[off] == ':') &&
-		la.nParents == ctx.nContainers() &&
+		parentMatch &&
 		ctx.blk.current != nil && ctx.blk.current.Type == ast.BlockP &&
 		(ctx.blk.current.NLines == 1 || p.flags&FlagTableInterruptParagraph != 0) {
 		if colCount, ok := isTableUnderline(line[off:]); ok {
 			// Compat: validate column count match.
 			// Default (lenient): skip validation (aligns with md4c).
-			// FlagStrictTableColumns set = require exact match (GFM standard, aligns with goldmark).
+			// FlagStrictTableColumns set = require header cell count <=
+			// delimiter cell count (mirrors goldmark's extension/table.go
+			// Transform() which rejects when header has MORE cells than
+			// delimiter, but pads when header has fewer).
 			headerLineIdx := ctx.blk.current.LineIdx + ctx.blk.current.NLines - 1
 			headerLine := ctx.blk.lines[headerLineIdx].Text
 			if validateTableColumns(headerLine, colCount, p.compat) {
 				la.lineType = LineTableUnderline
 				la.data = uint16(colCount)
 				la.content = line[off:]
+				// C-05: For lazy continuation, set nParents to match the
+				// container level (same as step 15 would). This ensures
+				// handleContainerTransitions treats the line as staying
+				// inside the current container, so the table is emitted
+				// inside the list/blockquote — matching goldmark.
+				if la.nParents != ctx.nContainers() {
+					la.nParents = ctx.nContainers()
+				}
 				return la
 			}
 			// Column mismatch: not a table, falls through to text continuation
@@ -981,8 +1022,10 @@ func (p *Parser) emitBlock(ctx *context, b *Block, r renderer.Renderer) {
 	case ast.BlockH, ast.BlockP:
 		// Inline-capable blocks: use the mark pipeline for inline analysis.
 		// Mirrors md4c md_process_all_blocks() → md_analyze_inlines + md_process_inlines.
-		p.analyzeInlines(ctx, b)
-		p.processInlines(ctx, b, r)
+		// blockText is assembled once and passed to processBlockInlines, which runs
+		// the full pipeline (collectMarks → resolve → emit) without re-assembling.
+		blockText := p.assembleBlockText(ctx, b)
+		p.processBlockInlines(ctx, blockText, r)
 		// Reset marks for next block (memory does not accumulate across blocks)
 		ctx.stk.reset()
 	case ast.BlockTable:
@@ -1146,6 +1189,28 @@ func stripTrailingHashes(content []byte, flags Flags) []byte {
 		}
 	}
 	return content[:end]
+}
+
+// canInterruptTable checks if the line starts a block-level structure that
+// should interrupt table continuation per GFM spec. Only checks ATX headings,
+// fenced code blocks, and HTML blocks — HR and container marks are already
+// handled in steps 5-9 of analyzeLine.
+func canInterruptTable(line []byte, flags Flags) bool {
+	if len(line) == 0 {
+		return false
+	}
+	switch line[0] {
+	case '#':
+		_, _, ok := parseATXHeaderContent(line, flags)
+		return ok
+	case '`', '~':
+		_, _, _, ok := isFencedCodeStart(line)
+		return ok
+	case '<':
+		_, ok := detectHTMLBlockStart(line)
+		return ok
+	}
+	return false
 }
 
 // isHR checks if line is a thematic break.

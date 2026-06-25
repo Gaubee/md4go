@@ -156,7 +156,7 @@ type CaseResult struct {
 	Outputs map[string]string // engine name → normalized output
 
 	// Pairwise diffs (populated when len(engines) >= 2)
-	Pairs [3]*DiffResult
+	Pairs []*DiffResult
 
 	// Error info per engine
 	Errors map[string]error // engine name → error (nil if success)
@@ -205,7 +205,7 @@ func FormatCaseReport(cr *CaseResult) string {
 	fmt.Fprintf(&b, "Input: %s\n", escapePreview(inputStr, 200))
 
 	// Each engine's output with line numbers
-	engineOrder := []string{"goldmark", "md4go", "md4c"}
+	engineOrder := []string{"goldmark", "md4go", "md4go-html", "md4go-html(goldmark-compat)", "md4c"}
 	for _, name := range engineOrder {
 		output, ok := cr.Outputs[name]
 		if !ok {

@@ -21,7 +21,7 @@ func TestShortcutReferenceLink(t *testing.T) {
 	ms.unresolvedLinkHead = -1
 	ms.unresolvedLinkTail = -1
 	collectMarks(&ms, []byte(input), &markCharMap, 0)
-	ms.analyzeMarks([]byte(input), []byte("[]!"))
+	ms.analyzeMarks([]byte(input))
 	ms.resolveBrackets([]byte(input), 0)
 
 	// Check that the bracket was resolved as a link
@@ -61,7 +61,7 @@ func TestAnalyzeBracket(t *testing.T) {
 			ms.unresolvedLinkHead = -1
 			ms.unresolvedLinkTail = -1
 			collectMarks(&ms, []byte(tc.input), &markCharMap, 0)
-			ms.analyzeMarks([]byte(tc.input), []byte("[]!"))
+			ms.analyzeMarks([]byte(tc.input))
 			ms.resolveBrackets([]byte(tc.input), 0)
 
 			resolvedCount := 0

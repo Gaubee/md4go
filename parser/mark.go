@@ -348,6 +348,11 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 	off := 0
 	size := len(blockText)
 
+	// Line boundary cache: since collectMarks scans sequentially, marks on
+	// the same line reuse cached boundaries without repeated backward scans.
+	// curLineBeg/curLineEnd are invalidated when off moves outside [beg, end).
+	curLineBeg, curLineEnd := 0, 0
+
 	for off < size {
 		// Fast skip: 4 characters at a time (loop unrolling, mirrors md4c)
 		for off+3 < size &&
@@ -515,7 +520,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 			off++
 
 		case '~':
-			off = collectTildeMark(ms, blockText, off, flags)
+			if off < curLineBeg || off >= curLineEnd {
+				curLineBeg, curLineEnd = findLineBounds(blockText, off)
+			}
+			off = collectTildeMark(ms, blockText, off, curLineBeg, flags)
 
 		case '^':
 			// Superscript: only single '^' is a delimiter; longer runs are literal.
@@ -526,7 +534,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 				tmp++
 			}
 			if tmp-off == 1 {
-				lb, _ := findLineBounds(blockText, off)
+				if off < curLineBeg || off >= curLineEnd {
+					curLineBeg, curLineEnd = findLineBounds(blockText, off)
+				}
+				lb := curLineBeg
 				f := markPotentialOpener | markPotentialCloser
 				// Cannot open if followed by whitespace or end of line
 				// (md4c: off + 1 >= line->end || ISUNICODEWHITESPACE(off + 1))
@@ -556,7 +567,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 				off = end
 				continue
 			}
-			lb, _ := findLineBounds(blockText, off)
+			if off < curLineBeg || off >= curLineEnd {
+				curLineBeg, curLineEnd = findLineBounds(blockText, off)
+			}
+			lb := curLineBeg
 			f := markPotentialOpener | markPotentialCloser
 			// Cannot open if preceded by non-whitespace non-punct (alphanumeric)
 			// (md4c: off > line->beg && !ISUNICODEWHITESPACEBEFORE(off) && !ISUNICODEPUNCTBEFORE(off))
@@ -582,7 +596,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 				end++
 			}
 			if end-off == 2 {
-				lb, _ := findLineBounds(blockText, off)
+				if off < curLineBeg || off >= curLineEnd {
+					curLineBeg, curLineEnd = findLineBounds(blockText, off)
+				}
+				lb := curLineBeg
 				f := markPotentialOpener | markPotentialCloser
 				// Cannot open if followed by whitespace or end of line
 				// (md4c: tmp >= line->end || ISUNICODEWHITESPACE(tmp))
@@ -622,7 +639,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 			// Mirrors md4c md_collect_marks() case '@' (md4c.c:3460-3472).
 			// Only create mark if there's an alnum before '@' and at least 3
 			// more characters after it (md4c requires off+3 < line->end).
-			lineBeg, lineEnd := findLineBounds(blockText, off)
+			if off < curLineBeg || off >= curLineEnd {
+				curLineBeg, curLineEnd = findLineBounds(blockText, off)
+			}
+			lineBeg, lineEnd := curLineBeg, curLineEnd
 			if off > lineBeg && isAlnum(blockText[off-1]) && off+3 < lineEnd && isAlnum(blockText[off+1]) {
 				ms.addMark(off, off+1, '@', markPotentialOpener)
 				// Dummy stores line boundaries for analyzePermissiveAutolink.
@@ -636,7 +656,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 			// Mirrors md4c md_collect_marks() case ':' (md4c.c:3474-3508).
 			// Must verify both scheme prefix AND "//" suffix after ':'.
 			// C checks scheme/suffix within line boundaries (line->beg/line->end).
-			lineBeg, lineEnd := findLineBounds(blockText, off)
+			if off < curLineBeg || off >= curLineEnd {
+				curLineBeg, curLineEnd = findLineBounds(blockText, off)
+			}
+			lineBeg, lineEnd := curLineBeg, curLineEnd
 			if schemeInfo, ok := isSchemeWithSuffix(blockText, off, lineBeg, lineEnd); ok {
 				// opener covers "scheme://" (from scheme start to after "//")
 				ms.addMark(schemeInfo.beg, schemeInfo.end, ':', markPotentialOpener)
@@ -651,7 +674,10 @@ func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags 
 			// Mirrors md4c md_collect_marks() case '.' (md4c.c:3510-3524).
 			// Must verify "www" prefix and boundary before it.
 			if wwwInfo, ok := isWWWPrefixWithBoundary(blockText, off); ok {
-				lineBeg, lineEnd := findLineBounds(blockText, off)
+				if off < curLineBeg || off >= curLineEnd {
+					curLineBeg, curLineEnd = findLineBounds(blockText, off)
+				}
+				lineBeg, lineEnd := curLineBeg, curLineEnd
 				// opener covers "www." (from 'w' start to after '.')
 				ms.addMark(wwwInfo.beg, wwwInfo.end, '.', markPotentialOpener)
 				// Dummy stores line boundaries
@@ -773,7 +799,7 @@ func collectEmphMark(ms *markStacks, text []byte, off int) int {
 	// inside emphasis spans (e.g., *___...___* in table cells) to be
 	// truncated, losing content. The Rule-of-3 algorithm is already O(n)
 	// and doesn't need truncation. md4c creates marks for the full run.
-	// Pathological input protection is handled by the codespanMaxLen=32
+	// Pathological input protection is handled by the codespanMaxLen=1024
 	// limit (for backtick runs) and the overall linear-time guarantees
 	// of the emphasis algorithm.
 
@@ -793,8 +819,14 @@ func collectEmphMark(ms *markStacks, text []byte, off int) int {
 // --- Code span mark collection ---
 
 // codespanMaxLen is the maximum backtick run length for code spans.
-// Prevents O(n²) pathological inputs. Mirrors md4c CODESPAN_MARK_MAXLEN.
-const codespanMaxLen = 32
+// Prevents O(n²) pathological inputs.
+//
+// CommonMark 0.31 §6.1 imposes no maximum on backtick string length.
+// md4c's CODESPAN_MARK_MAXLEN=32 is a non-standard limitation that causes
+// 33+ backtick code spans to be unrecognized. md4go raises the limit to
+// 1024, which covers all practical inputs while still providing O(n²)
+// protection against pathological backtick-heavy inputs.
+const codespanMaxLen = 1024
 
 // collectCodeSpanMark handles backtick marks for code spans.
 // Mirrors md4c md_collect_marks() case '`' — attempts immediate pairing
@@ -856,13 +888,17 @@ func collectCodeSpanMark(ms *markStacks, text []byte, off int, cc compatConfig) 
 // collectTildeMark handles ~ marks for strikethrough (~~ or ~) and subscript (~).
 // Mirrors md4c md_collect_marks() case '~' (md4c.c:3592-3622).
 //
-// GFM Strikethrough flanking rules (different from emphasis):
+// GFM Strikethrough flanking rules (default, md4c):
 //   - Remove OPENER if preceded by non-whitespace AND non-punctuation ("other")
 //   - Remove CLOSER if followed by non-whitespace AND non-punctuation ("other")
 //
 // This is more permissive than emphasis flanking: strikethrough can open/close
 // adjacent to punctuation, while emphasis has stricter rules.
-func collectTildeMark(ms *markStacks, text []byte, off int, flags Flags) int {
+//
+// When FlagStrikethroughPermissive is set, ~~ instead follows the CommonMark
+// *-style flanking (no intraword restriction), matching cmark-gfm (the GFM
+// reference implementation) and goldmark.
+func collectTildeMark(ms *markStacks, text []byte, off int, lineBeg int, flags Flags) int {
 	end := off + 1
 	for end < len(text) && text[end] == '~' {
 		end++
@@ -878,7 +914,6 @@ func collectTildeMark(ms *markStacks, text []byte, off int, flags Flags) int {
 			mFlags &^= markPotentialOpener
 		}
 		// Cannot close if preceded by whitespace or start of line
-		lineBeg, _ := findLineBounds(text, off)
 		if off <= lineBeg || isWhitespaceBefore(text, off) {
 			mFlags &^= markPotentialCloser
 		}
@@ -886,18 +921,53 @@ func collectTildeMark(ms *markStacks, text []byte, off int, flags Flags) int {
 			ms.addMark(off, end, '~', mFlags)
 		}
 	} else if runLen <= 2 && flags&FlagStrikethrough != 0 {
-		// Strikethrough: GFM left/right-flanking rules.
-		// Mirrors md4c md4c.c:3610-3619.
-		mFlags := markPotentialOpener | markPotentialCloser
+		// Strikethrough: ~~ delimiters.
 		leftLevel := charFlankLevel(text, off, -1)
 		rightLevel := charFlankLevel(text, end-1, 1)
-		// Remove OPENER if preceded by non-whitespace non-punct ("other")
-		if leftLevel == 2 {
-			mFlags &^= markPotentialOpener
-		}
-		// Remove CLOSER if followed by non-whitespace non-punct ("other")
-		if rightLevel == 2 {
-			mFlags &^= markPotentialCloser
+
+		var mFlags markFlags
+		if flags&FlagStrikethroughPermissive != 0 {
+			// Permissive flanking: ~~ behaves like * emphasis (CommonMark
+			// left/right-flanking, NO intraword restriction). Matches the
+			// GFM reference implementation (cmark-gfm) and goldmark, which
+			// treat ~ as a *-style delimiter: canOpen = left-flanking,
+			// canClose = right-flanking. This allows intraword strikethrough
+			// such as "foo~~bar~~baz" -> "foo<del>bar</del>baz".
+			//
+			// The GFM spec text (§6.5) only says strikethrough is "delimited
+			// by two tildes" and does not specify flanking for the intraword
+			// case; both cmark-gfm and goldmark are permissive, while md4c
+			// (the default below) applies a stricter intraword restriction.
+			if rightLevel != 0 { // not followed by whitespace
+				if rightLevel == 1 { // followed by punctuation
+					if leftLevel == 0 || leftLevel == 1 { // preceded by ws/punct
+						mFlags |= markPotentialOpener
+					}
+				} else { // followed by other
+					mFlags |= markPotentialOpener
+				}
+			}
+			if leftLevel != 0 { // not preceded by whitespace
+				if leftLevel == 1 { // preceded by punctuation
+					if rightLevel == 0 || rightLevel == 1 { // followed by ws/punct
+						mFlags |= markPotentialCloser
+					}
+				} else { // preceded by other
+					mFlags |= markPotentialCloser
+				}
+			}
+		} else {
+			// md4c strikethrough flanking (default): stricter than emphasis.
+			// Mirrors md4c md4c.c:3610-3619.
+			// Remove OPENER if preceded by non-whitespace non-punct ("other")
+			// Remove CLOSER if followed by non-whitespace non-punct ("other")
+			mFlags = markPotentialOpener | markPotentialCloser
+			if leftLevel == 2 {
+				mFlags &^= markPotentialOpener
+			}
+			if rightLevel == 2 {
+				mFlags &^= markPotentialCloser
+			}
 		}
 		if mFlags != 0 {
 			ms.addMark(off, end, '~', mFlags)

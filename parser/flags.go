@@ -126,16 +126,92 @@ const (
 	// Default: split || per GFM standard (aligns with md4c).
 	FlagProtectDoublePipe Flags = 0x800000
 
-	// FlagStrictTableColumns requires table header and delimiter rows to
-	// have matching column counts (GFM standard, aligns with goldmark).
-	// Default: lenient — does not validate column count match (md4c behavior).
+	// FlagStrictTableColumns requires the table header row to have a column
+	// count that matches the delimiter row (GFM standard). When enabled,
+	// tables with mismatched header↔delimiter column counts are NOT
+	// recognized as tables — the lines fall back to paragraph continuation.
+	// Default: lenient — does not validate header column count (md4c behavior).
+	//
+	// This flag aligns md4go's header validation with goldmark's
+	// extension/table.go Transform(), which rejects the entire paragraph→table
+	// transformation when `len(alignments) != header.ChildCount()`.
+	//
+	// Note: goldmark's pad/truncate strategy applies ONLY to non-header data
+	// rows (parseRow pads shorter rows with empty cells, truncates longer
+	// rows). For the header row, goldmark strictly rejects. md4go's
+	// FlagStrictTableColumns only validates the header row (in analyzeLine,
+	// before the table is opened), so its semantics match goldmark exactly.
 	FlagStrictTableColumns Flags = 0x1000000
+
+	// FlagTableInterruptByHeaders allows block-level structures (ATX headings,
+	// fenced code blocks, HTML blocks) to interrupt table continuation.
+	//
+	// Per GFM spec: "The table is broken at the first empty line, or beginning
+	// of another block-level structure." md4c's single-pass analyzeLine checks
+	// table continuation (step 10) before block-start dispatch (step 11),
+	// so block-level structures are misclassified as table data rows.
+	//
+	// When this flag is set, step 10 checks if the current line starts an
+	// ATX heading, fenced code block, or HTML block before classifying it
+	// as a table row. HR and container marks are already handled in earlier
+	// steps and do not need re-checking.
+	//
+	// Default (unset): md4c behavior — table continuation takes priority
+	// over block-start detection.
+	FlagTableInterruptByHeaders Flags = 0x2000000
 
 	// FlagDecodeEntities decodes HTML entities to Unicode in plain text
 	// output (goldmark behavior). Default: preserves entity text verbatim
 	// (e.g. &amp; stays &amp;). No plain-text rendering standard; both
 	// behaviors are reasonable.
 	FlagDecodeEntities Flags = 0x10000000
+
+	// FlagStripBOM strips a leading UTF-8 BOM (U+FEFF, bytes EF BB BF)
+	// from the input. CommonMark 0.31 does not specify BOM handling —
+	// both preserving and stripping are valid. goldmark strips BOM via
+	// its HTML/goquery pipeline; md4c preserves it. Enable this flag
+	// for goldmark compatibility.
+	FlagStripBOM Flags = 0x20000000
+
+	// FlagStrikethroughPermissive loosens strikethrough (~~) flanking so
+	// that ~~ behaves like * emphasis (CommonMark left/right-flanking with
+	// NO intraword restriction). This matches the GFM reference
+	// implementation (cmark-gfm) and goldmark, both of which treat ~ as a
+	// *-style delimiter (canOpen = left-flanking, canClose =
+	// right-flanking) and accept intraword strikethrough such as
+	// "foo~~bar~~baz" -> "foo<del>bar</del>baz".
+	//
+	// The GFM spec text (§6.5) only states strikethrough is "delimited by
+	// two tildes" and does not specify flanking for the intraword case;
+	// both cmark-gfm and goldmark are permissive, while md4c (md4go's
+	// default) applies an intraword restriction that is stricter than the
+	// GFM reference. Default (unset) keeps md4c's strict flanking for
+	// 1:1 md4c compatibility.
+	FlagStrikethroughPermissive Flags = 0x40000000
+
+	// FlagStripHTMLTags strips HTML tags from raw HTML content (inline
+	// HTML spans and HTML blocks) in plain-text rendering, extracting only
+	// the textual content. For example "<span>html</span>" becomes "html",
+	// "<br>" becomes empty.
+	//
+	// For non-visible elements (script, style, head, title, noscript,
+	// template), the entire element content is removed — not just the tags
+	// — matching the behavior of DOM-based text extraction (goquery,
+	// browsers). This uses parser.SkipNonVisibleContent to skip content
+	// between opening and closing tags of non-visible elements.
+	//
+	// This aligns with goldmark's behavior (goquery strips all HTML tags).
+	// md4go's default preserves raw HTML text verbatim, matching md4c.
+	FlagStripHTMLTags Flags = 0x80000000
+
+	// FlagNoXHTMLEntityEncoding disables XHTML-safe entity encoding in the
+	// HTML renderer. When set, ' and " are not encoded as &#x27; and &quot;
+	// in text content (only & < > are escaped, matching goldmark).
+	// In attribute values, " is still escaped (needed for "-delimited attrs).
+	//
+	// Default (unset): XHTML-safe encoding — ' → &#x27;, " → &quot;
+	// (matches md4c-html.c). This is the more conservative encoding strategy.
+	FlagNoXHTMLEntityEncoding Flags = 0x4000000
 )
 
 // ═══════════════════════════════════════════════════════════════
@@ -187,6 +263,19 @@ const (
 
 const (
 	// GoldmarkCompat aligns output with goldmark's behavior.
-	// Includes FlagStrictTableColumns (goldmark enforces GFM column count match).
-	GoldmarkCompat = FlagTableInterruptParagraph | FlagStrictTableColumns | FlagDecodeEntities
+	// Includes FlagTableInterruptParagraph (goldmark allows tables to interrupt
+	// paragraphs), FlagDecodeEntities (goldmark decodes HTML entities),
+	// FlagStripBOM (goldmark strips BOM via goquery), and
+	// FlagStrikethroughPermissive (goldmark/cmark-gfm treat ~~ like * emphasis,
+	// accepting intraword strikethrough; md4c's default is stricter), and
+	// FlagStripHTMLTags (goldmark strips HTML tags via goquery; md4c preserves
+	// raw HTML text verbatim), and
+	// FlagStrictTableColumns (goldmark's extension/table.go Transform() strictly
+	// rejects paragraph→table transformation when header column count differs
+	// from delimiter count; md4c's default is lenient and accepts any mismatch).
+	//
+	// See DIFFCHECK_REPORT.md §2 T6a / §3 H1 for the analysis that motivated
+	// including FlagStrictTableColumns (it eliminates the largest class of
+	// md4go≠goldmark parser diffs: ~640 of 1425 html-pipeline diffs).
+	GoldmarkCompat = FlagTableInterruptParagraph | FlagDecodeEntities | FlagStripBOM | FlagStrikethroughPermissive | FlagStripHTMLTags | FlagStrictTableColumns | FlagTableInterruptByHeaders | FlagNoXHTMLEntityEncoding
 )

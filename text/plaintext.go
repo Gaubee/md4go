@@ -27,6 +27,13 @@ type PlainText struct {
 	needBlank   bool         // need blank line before next text
 	needNL      bool         // need newline before next text
 
+	// skipNonVisible tracks whether we're inside a non-visible HTML element
+	// (script, style, etc.) within an HTML block. HTML blocks are emitted
+	// line-by-line as separate TextHTML events, so extractHTMLText cannot
+	// span events. This flag carries state across events to skip content
+	// of non-visible elements that span multiple TextHTML events.
+	skipNonVisible string // empty = not skipping; non-empty = tag name being skipped
+
 	// tightListDepth tracks nesting depth of tight lists.
 	tightListDepth int
 
@@ -89,6 +96,16 @@ func (pt *PlainText) Text(t ast.TextType, text []byte) error {
 			return err
 		}
 		_, err := pt.w.Write(decodeEntity(text, pt.compat.decodeEntities))
+		return err
+	case ast.TextHTML:
+		if err := pt.flushPending(); err != nil {
+			return err
+		}
+		if pt.compat.stripHTMLTags {
+			_, err := pt.writeHTMLText(text)
+			return err
+		}
+		_, err := pt.w.Write(text)
 		return err
 	default:
 		if err := pt.flushPending(); err != nil {
@@ -184,6 +201,9 @@ func (pt *PlainText) LeaveBlock(b ast.BlockType, detail any) error {
 	switch b {
 	case ast.BlockQuote, ast.BlockH, ast.BlockCode, ast.BlockHTML, ast.BlockHR,
 		ast.BlockTable, ast.BlockFootnoteDef:
+		if b == ast.BlockHTML {
+			pt.skipNonVisible = "" // reset non-visible element tracking
+		}
 		pt.needNL = true
 	case ast.BlockP:
 		if !pt.inTD {
@@ -275,4 +295,39 @@ func (pt *PlainText) Flush() error {
 		pt.needNL = false
 	}
 	return pt.w.Flush()
+}
+
+// writeHTMLText writes HTML text content with tag stripping.
+//
+// For inline HTML spans (outside BlockHTML), extractHTMLText handles the
+// complete fragment in one call — no cross-event state needed.
+//
+// For HTML blocks (inside BlockHTML), the parser emits content line-by-line
+// as separate TextHTML events. Non-visible elements (script, style, etc.)
+// that span multiple lines require tracking state across events: when
+// extractHTMLText encounters an unclosed non-visible element opening tag,
+// it returns the tag name via unclosedNV; we store it in skipNonVisible and
+// skip subsequent lines until the closing tag is found.
+func (pt *PlainText) writeHTMLText(text []byte) (int, error) {
+	// If inside an HTML block and skipping a non-visible element,
+	// check if this line contains the closing tag.
+	if pt.inHTMLBlock && pt.skipNonVisible != "" {
+		if closeEnd := parser.SkipNonVisibleContent(text, 0, pt.skipNonVisible); closeEnd >= 0 {
+			// Closing tag found — reset state, process remainder of line.
+			pt.skipNonVisible = ""
+			text = text[closeEnd:]
+		} else {
+			// Still inside non-visible element — skip entire line.
+			return 0, nil
+		}
+	}
+
+	// Extract visible text and check for unclosed non-visible element.
+	extracted, unclosedNV := extractHTMLTextTracked(text)
+	n, err := pt.w.Write(extracted)
+
+	if pt.inHTMLBlock && unclosedNV != "" {
+		pt.skipNonVisible = unclosedNV
+	}
+	return n, err
 }

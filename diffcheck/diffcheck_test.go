@@ -17,6 +17,7 @@ const testTimeout = 10 * time.Second
 //   - S-02: tight list paragraph separator (md4go preserves word boundaries)
 //   - S-05: footnote reference [N] output (md4go outputs [N])
 //   - S-06: NULL character handling (md4go follows CommonMark: NULL→U+FFFD)
+//   - S-07: code span backtick limit (md4go supports 1024, md4c limited to 32 — non-standard)
 //
 // These are tracked via the maxMd4cDiffs threshold. The test fails only if
 // the diff count EXCEEDS the known baseline, catching regressions.
@@ -26,7 +27,7 @@ const testTimeout = 10 * time.Second
 // CDATA handling, image text stripping).
 func TestDiffCheckFuzzMd4cAlignment(t *testing.T) {
 	cases := LoadFuzzSeeds()
-	runMd4cAlignmentCheck(t, cases, NormalizeLoose, 3, "default GFM")
+	runMd4cAlignmentCheck(t, cases, NormalizeLoose, 4, "default GFM")
 }
 
 // TestDiffCheckConstructedMd4cAlignment verifies md4go aligns with md4c on
@@ -50,7 +51,7 @@ func TestDiffCheckCommonMarkAlignment(t *testing.T) {
 	} else {
 		t.Logf("md4c engine unavailable: %v", err)
 	}
-	runMd4cAlignmentCheckWithEngines(t, cases, NormalizeLoose, engines, 2, "CommonMark")
+	runMd4cAlignmentCheckWithEngines(t, cases, NormalizeLoose, engines, 3, "CommonMark")
 }
 
 // TestDiffCheckStrictDiagnostics runs fuzz seeds in strict normalization mode
@@ -76,7 +77,7 @@ func TestDiffCheckGoldmarkDiagnostics(t *testing.T) {
 
 // TestDiffCheckJSONLAlignment runs the full JSONL dataset (10350 cases) against
 // md4go and md4c in loose mode. Skipped in short mode or if data is missing.
-// The known diff baseline is 56 (S-01~S-06 documented differences).
+// The known diff baseline is 60 (S-01~S-07 documented differences).
 func TestDiffCheckJSONLAlignment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping JSONL test in short mode")
@@ -95,7 +96,7 @@ func TestDiffCheckJSONLAlignment(t *testing.T) {
 		t.Fatal("no cases loaded from JSONL")
 	}
 
-	runMd4cAlignmentCheck(t, cases, NormalizeLoose, 60, "JSONL default")
+	runMd4cAlignmentCheck(t, cases, NormalizeLoose, 64, "JSONL default")
 }
 
 // runMd4cAlignmentCheck runs md4go and md4c engines and fails if md4go≠md4c

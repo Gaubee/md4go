@@ -19,6 +19,7 @@ func main() {
 	normMode := flag.String("normalize", "loose", "normalization mode: loose or strict")
 	dialect := flag.String("dialect", "github", "markdown dialect: github or commonmark")
 	compat := flag.String("compat", "none", "md4go compat mode: none or goldmark")
+	withMd4goHTML := flag.Bool("md4go-html", false, "include md4go-html engine (md4go→HTML→goquery text pipeline)")
 	outputPath := flag.String("output", "", "write report to this file instead of stdout")
 	verbose := flag.Bool("v", false, "show identical cases too")
 	flag.Parse()
@@ -111,6 +112,11 @@ func main() {
 	var engines []diffcheck.Engine
 
 	engines = append(engines, diffcheck.NewMd4goEngine(*timeout, diffcheck.WithMd4goFlags(md4goFlags)))
+
+	// Optional: md4go-html engine (md4go→HTML→goquery text, same pipeline as goldmark)
+	if *withMd4goHTML {
+		engines = append(engines, diffcheck.NewMd4goHTMLEngine(*timeout, diffcheck.WithMd4goHTMLFlags(md4goFlags)))
+	}
 
 	md4cEng, err := diffcheck.NewMd4cEngine(*timeout, md4cOpts...)
 	if err != nil {

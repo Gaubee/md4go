@@ -129,7 +129,7 @@ md4go/
 - 扩展语法 flag 正交性（Tables, Strikethrough, Tasklists, Footnotes, Highlight, Spoilers 等）
 - Dialect 预设组合验证（DialectCommonMark=0, DialectGitHub 组成, GoldmarkCompat 组成）
 - Flag 值唯一性（25 个 flag 均为不重叠的 2 的幂）
-- S-01~S-06 默认行为验证（ProtectDoublePipe, tight list 分隔符, footnote ref, NULL code span 等）
+- S-01~S-07 默认行为验证（ProtectDoublePipe, tight list 分隔符, footnote ref, NULL code span, 超长 code span 等）
 
 ### 3.7 回归测试 (`parser/regression_test.go` + `html/regression_test.go`)
 
@@ -149,6 +149,7 @@ md4go/
 | `TestHighlightLengthGuard` | `==` vs `=` 长度守卫 | I58 |
 | `TestSpoilerLengthGuard` | `\|\|` vs `\|` 长度守卫 | I58 |
 | `TestNullCharInCodeSpan` | NULL → U+FFFD (S-06) | I59 |
+| `TestLongCodeSpanRecognition` | 33+ 反引号 code span (S-07) | I62 |
 | `TestHTMLEntityCodepointZero` | `&#0;` → U+FFFD | I59 |
 | `TestHTMLEntitySurrogatePair` | 代理对 → U+FFFD | I59 |
 | `TestHTMLInvalidNumericEntity` | 无效数字实体原样输出 | I59 |
@@ -296,6 +297,7 @@ md4go 在以下场景比 md4c 更正确（有意为之，非 bug）：
 | S-04 | tight list 段落分隔 | 同 S-02，plaintext 场景 |
 | S-05 | footnote ref [N] 输出 | md4go 输出 [N]，md4c 省略 |
 | S-06 | NULL code span 识别 | md4go 识别含 NULL 的 code span 并替换为 U+FFFD |
+| S-07 | 超长 code span 识别 | md4go 支持 1024 反引号 code span（CommonMark 无限制），md4c 限 32（非标准） |
 
 ---
 

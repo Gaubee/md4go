@@ -1,7 +1,5 @@
 package parser
 
-import "github.com/userpro/md4go/ast"
-
 // emphasis.go implements the Rule-of-3 emphasis resolution algorithm.
 // Mirrors md4c md_analyze_emph() + md_split_emph_mark() + md_analyze_marks().
 //
@@ -335,30 +333,38 @@ func isDigit(c byte) bool {
 	return c >= '0' && c <= '9'
 }
 
-// analyzeMarks iterates through marks and resolves them by type.
-// Only processes marks whose character is in markChars.
-// Skips already-resolved marks (from earlier phases).
-// Mirrors md4c md_analyze_marks() (md4c.c:4549-4614).
-func (ms *markStacks) analyzeMarks(blockText []byte, markChars []byte) {
+// analyzeMarksRange is the unified mark analysis loop.
+// It iterates through marks[markBeg:markEnd], resolving those whose character
+// is in the filter set. Mirrors md4c md_analyze_marks() (md4c.c:4549-4614).
+//
+// When hasNoskip is true, resolved openers whose character is in the noskip set
+// are NOT skipped past (used by permissive autolinks to avoid expanding into
+// resolved emphasis spans).
+func (ms *markStacks) analyzeMarksRange(
+	blockText []byte, markBeg, markEnd int,
+	filter [256]bool, noskip [256]bool, hasNoskip bool, flags Flags,
+) {
 	lastEnd := 0
-	if len(ms.marks) > 0 {
-		lastEnd = ms.marks[0].Beg
+	if markBeg < len(ms.marks) {
+		lastEnd = ms.marks[markBeg].Beg
 	}
 
-	for i := 0; i < len(ms.marks); i++ {
+	for i := markBeg; i < markEnd && i < len(ms.marks); i++ {
 		mark := &ms.marks[i]
 
 		// Skip resolved spans
 		if mark.Flags&markResolved != 0 {
 			if mark.Flags&markOpener != 0 && mark.Next >= 0 {
-				// Skip past the closer
-				i = mark.Next
+				// If this mark is in the noskip set, don't skip past it
+				if !hasNoskip || !noskip[mark.Ch] {
+					i = mark.Next
+				}
 			}
 			continue
 		}
 
 		// Skip marks not in the filter set
-		if !isInMarkChars(mark.Ch, markChars) {
+		if !filter[mark.Ch] {
 			continue
 		}
 
@@ -385,83 +391,6 @@ func (ms *markStacks) analyzeMarks(blockText []byte, markChars []byte) {
 			ms.analyzeHighlight(i)
 		case '[', ']':
 			ms.analyzeBracket(i)
-		}
-
-		// Update lastEnd if the mark was resolved
-		if mark.Flags&markResolved != 0 {
-			if mark.Flags&markOpener != 0 && mark.Next >= 0 {
-				lastEnd = ms.marks[mark.Next].End
-			} else {
-				lastEnd = mark.End
-			}
-		}
-	}
-}
-
-// isInMarkChars checks if ch is in the markChars filter set.
-func isInMarkChars(ch byte, markChars []byte) bool {
-	for _, c := range markChars {
-		if c == ch {
-			return true
-		}
-	}
-	return false
-}
-
-// analyzeMarksPass is a variant of analyzeMarks that supports noskipMarkChars.
-// It iterates through marks and resolves them by type.
-// Only processes marks whose character is in markChars.
-// Marks in noskipMarkChars are not skipped even if they're resolved openers
-// (used by permissive autolinks to avoid expanding into resolved emphasis spans).
-// Mirrors md4c md_analyze_marks() (md4c.c:4549-4614) with noskip behavior.
-func (ms *markStacks) analyzeMarksPass(blockText []byte, markBeg, markEnd int,
-	markChars, noskipMarkChars []byte, flags Flags) {
-
-	lastEnd := 0
-	if markBeg < len(ms.marks) {
-		lastEnd = ms.marks[markBeg].Beg
-	}
-
-	for i := markBeg; i < markEnd && i < len(ms.marks); i++ {
-		mark := &ms.marks[i]
-
-		// Skip resolved spans
-		if mark.Flags&markResolved != 0 {
-			if mark.Flags&markOpener != 0 && mark.Next >= 0 {
-				// If this mark is in noskipMarkChars, don't skip past it
-				if noskipMarkChars == nil || !isInMarkChars(mark.Ch, noskipMarkChars) {
-					i = mark.Next
-				}
-			}
-			continue
-		}
-
-		// Skip marks not in the filter set
-		if !isInMarkChars(mark.Ch, markChars) {
-			continue
-		}
-
-		// The resolving in previous step could have expanded a mark.
-		if mark.Beg < lastEnd {
-			continue
-		}
-
-		// Analyze the mark by type
-		switch mark.Ch {
-		case '&':
-			ms.analyzeEntity(blockText, i)
-		case '*', '_':
-			ms.analyzeEmph(i)
-		case '~':
-			ms.analyzeTilde(i)
-		case '^':
-			ms.analyzeCaret(i)
-		case '$':
-			ms.analyzeDollar(i)
-		case '|':
-			ms.analyzeSpoiler(i)
-		case '=':
-			ms.analyzeHighlight(i)
 		case '@', ':', '.':
 			ms.analyzePermissiveAutolink(blockText, i, flags)
 		}
@@ -477,40 +406,20 @@ func (ms *markStacks) analyzeMarksPass(blockText []byte, markBeg, markEnd int,
 	}
 }
 
-// resolveEmphSpanType determines the span type (em or strong) for an
-// emphasis mark based on its length. The mark may span multiple characters
-// (e.g., *** = strong+em). This function is called during processInlines
-// to emit the correct enter/leave span events.
+// analyzeMarks resolves bracket spans (links, images, footnotes).
+// Thin wrapper around analyzeMarksRange with the "[]!" filter.
 //
-// Mirrors md4c md_process_inlines() case '*','_' (md4c.c:4846-4866):
-//
-//	For opener: if odd length, emit <em> first, then <strong> pairs.
-//	For closer: emit <strong> pairs first, then <em> if odd.
-func resolveEmphSpanType(markLen int, isOpener bool) []ast.SpanType {
-	if markLen <= 0 {
-		return nil
-	}
-	spans := make([]ast.SpanType, 0, (markLen+1)/2)
-
-	if isOpener {
-		// Opener: odd → <em> first, then <strong> pairs
-		if markLen%2 == 1 {
-			spans = append(spans, ast.SpanEm)
-			markLen--
-		}
-		for markLen >= 2 {
-			spans = append(spans, ast.SpanStrong)
-			markLen -= 2
-		}
-	} else {
-		// Closer: <strong> pairs first, then <em> if odd
-		for markLen >= 2 {
-			spans = append(spans, ast.SpanStrong)
-			markLen -= 2
-		}
-		if markLen == 1 {
-			spans = append(spans, ast.SpanEm)
-		}
-	}
-	return spans
+// flags is passed as 0 because the filter only includes bracket characters;
+// the '@', ':', '.' cases (which use flags for permissive autolinks) are
+// never reached. Permissive autolinks are handled separately in
+// analyzeLinkContents, which passes the real flags.
+func (ms *markStacks) analyzeMarks(blockText []byte) {
+	var filter [256]bool
+	filter['['] = true
+	filter[']'] = true
+	filter['!'] = true
+	ms.analyzeMarksRange(blockText, 0, len(ms.marks), filter, [256]bool{}, false, 0)
 }
+
+// resolveEmphSpanType logic is inlined in processInlines (inline.go)
+// case '*','_' to eliminate per-mark heap allocation of []ast.SpanType.

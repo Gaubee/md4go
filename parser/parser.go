@@ -71,7 +71,6 @@ func (discardRenderer) LeaveBlock(ast.BlockType, any) error { return nil }
 func (discardRenderer) EnterSpan(ast.SpanType, any) error   { return nil }
 func (discardRenderer) LeaveSpan(ast.SpanType, any) error   { return nil }
 func (discardRenderer) Text(ast.TextType, []byte) error     { return nil }
-func (discardRenderer) Flush() error                        { return nil }
 
 // Parse parses src ([]byte) and pushes events to r.
 // Uses SliceSource internally — refdefs are fully visible in document order,
@@ -175,27 +174,16 @@ func (p *Parser) processFootnoteDefs(ctx *context, r renderer.Renderer) error {
 		//   md_process_normal_block_contents(ctx, def->content_lines, def->n_content_lines)
 		//   MD_LEAVE_BLOCK(FOOTNOTE_DEF, &det)
 		if def.NContentLines > 0 {
-			// Create a temporary block for the footnote content and process inlines
-			tempBlock := &Block{
-				Type:    ast.BlockP,
-				NLines:  def.NContentLines,
-				LineIdx: 0,
-			}
-			// Store content lines in a temporary line slice
-			tempLines := make([]Line, def.NContentLines)
-			copy(tempLines, def.ContentLines[:def.NContentLines])
+			// Assemble footnote content text directly from content lines,
+			// without save/restore of ctx.blk. processBlockInlines accepts
+			// pre-assembled blockText, so no temp block is needed.
+			blockText := assembleTextFromLines(def.ContentLines[:def.NContentLines])
 
-			// Save and restore context's block/lines state
-			savedBlk := ctx.blk
-			ctx.blk = blockStack{}
-			ctx.blk.current = tempBlock
-			ctx.blk.lines = tempLines
-
-			p.analyzeInlines(ctx, tempBlock)
-			p.processInlines(ctx, tempBlock, r)
-
-			// Restore
-			ctx.blk = savedBlk
+			// Reset marks for footnote processing
+			ctx.stk.reset()
+			p.processBlockInlines(ctx, blockText, r)
+			// Reset marks after processing
+			ctx.stk.reset()
 		}
 
 		if err := r.LeaveBlock(ast.BlockFootnoteDef, detail); err != nil {
@@ -230,6 +218,7 @@ func (p *Parser) parseLinesInternal(src stream.LineSource, r renderer.Renderer, 
 	// Two lineAnalysis buffers for alternating pivot/current (md4c pattern)
 	var lineBufs [2]lineAnalysis
 	pivot := &dummyBlankLine
+	firstLine := true
 
 	for {
 		line, ok, err := src.NextLine()
@@ -238,6 +227,18 @@ func (p *Parser) parseLinesInternal(src stream.LineSource, r renderer.Renderer, 
 		}
 		if !ok {
 			break
+		}
+
+		// Strip leading UTF-8 BOM (EF BB BF) from the first line when
+		// FlagStripBOM is set. CommonMark does not specify BOM handling;
+		// goldmark strips it, md4c preserves it. Mirrors no md4c code —
+		// this is an md4go-specific compatibility flag.
+		if firstLine {
+			firstLine = false
+			if p.flags&FlagStripBOM != 0 && len(line) >= 3 &&
+				line[0] == 0xEF && line[1] == 0xBB && line[2] == 0xBF {
+				line = line[3:]
+			}
 		}
 
 		// Alternate between two buffers so pivot stays valid

@@ -86,3 +86,108 @@ func TestPlainTextNestedTightList(t *testing.T) {
 		})
 	}
 }
+
+// TestStripHTMLTags verifies FlagStripHTMLTags strips HTML tags from raw HTML
+// content (inline spans and HTML blocks) in plain-text rendering.
+func TestStripHTMLTags(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantDefault  string // output without FlagStripHTMLTags (verbatim HTML)
+		wantStripped string // output with FlagStripHTMLTags (tags removed)
+	}{
+		{
+			name:         "inline_html_span",
+			input:        "<span>html</span>\n",
+			wantDefault:  "\n<span>html</span>\n",
+			wantStripped: "\nhtml\n",
+		},
+		{
+			name:         "br_tag",
+			input:        "<br>\n",
+			wantDefault:  "\n<br>\n\n",
+			wantStripped: "\n\n\n",
+		},
+		{
+			name:         "nested_html",
+			input:        "<div><p>text</p></div>\n",
+			wantDefault:  "\n<div><p>text</p></div>\n\n",
+			wantStripped: "\ntext\n\n",
+		},
+		{
+			name:         "html_with_attributes",
+			input:        "<a href=\"url\">link text</a>\n",
+			wantDefault:  "\n<a href=\"url\">link text</a>\n",
+			wantStripped: "\nlink text\n",
+		},
+		{
+			name:         "pseudo_tag_in_text",
+			input:        "sys/arch/<arch>/mca/mca_machdep.c\n",
+			wantDefault:  "\nsys/arch/<arch>/mca/mca_machdep.c\n",
+			wantStripped: "\nsys/arch//mca/mca_machdep.c\n",
+		},
+		// Edge cases: '>' inside HTML constructs must not prematurely close tags.
+		{
+			name: "quoted_attr_with_gt",
+			// <a title="x > y"> is one inline HTML tag; '>' inside the
+			// double-quoted attribute value must not close the tag early.
+			input:        "<a title=\"x > y\">link</a>\n",
+			wantDefault:  "\n<a title=\"x > y\">link</a>\n",
+			wantStripped: "\nlink\n",
+		},
+		{
+			name: "html_comment_with_gt",
+			// The entire comment (including '>' inside) must be stripped.
+			input:        "<!-- comment with > inside -->\n",
+			wantDefault:  "\n<!-- comment with > inside -->\n\n",
+			wantStripped: "\n\n\n",
+		},
+		{
+			name: "cdata_section",
+			// The entire CDATA section must be stripped.
+			input:        "<![CDATA[data]]>\n",
+			wantDefault:  "\n<![CDATA[data]]>\n\n",
+			wantStripped: "\n\n\n",
+		},
+		{
+			name: "processing_instruction",
+			// The entire PI must be stripped.
+			input:        "<?php echo ?>\n",
+			wantDefault:  "\n<?php echo ?>\n\n",
+			wantStripped: "\n\n\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Default (no stripping)
+			var bufDef bytes.Buffer
+			if err := text.Convert([]byte(tt.input), &bufDef, text.WithFlags(0)); err != nil {
+				t.Fatalf("Convert default: %v", err)
+			}
+			if got := bufDef.String(); got != tt.wantDefault {
+				t.Errorf("default input %q:\n  want %q\n  got  %q", tt.input, tt.wantDefault, got)
+			}
+
+			// With FlagStripHTMLTags
+			var bufStrip bytes.Buffer
+			if err := text.Convert([]byte(tt.input), &bufStrip,
+				text.WithFlags(parser.FlagStripHTMLTags)); err != nil {
+				t.Fatalf("Convert stripped: %v", err)
+			}
+			if got := bufStrip.String(); got != tt.wantStripped {
+				t.Errorf("stripped input %q:\n  want %q\n  got  %q", tt.input, tt.wantStripped, got)
+			}
+
+			// GoldmarkCompat should also strip HTML
+			var bufCompat bytes.Buffer
+			if err := text.Convert([]byte(tt.input), &bufCompat,
+				text.WithFlags(parser.DialectGitHub|parser.GoldmarkCompat)); err != nil {
+				t.Fatalf("Convert compat: %v", err)
+			}
+			if got := bufCompat.String(); got != tt.wantStripped {
+				t.Errorf("compat input %q:\n  want %q\n  got  %q", tt.input, tt.wantStripped, got)
+			}
+		})
+	}
+}

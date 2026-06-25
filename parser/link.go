@@ -611,80 +611,28 @@ func (ms *markStacks) suppressPermissiveAutolinkInLink(openerIndex, closerIndex 
 // Mirrors md4c md_analyze_link_contents() (md4c.c:4656-4699).
 func (ms *markStacks) analyzeLinkContents(blockText []byte, markBeg, markEnd int, flags Flags) {
 	// Build mark character filter based on flags
-	markChars := []byte("*_&")
+	var filter [256]bool
+	filter['*'] = true
+	filter['_'] = true
+	filter['&'] = true
 	if flags&FlagStrikethrough != 0 || flags&FlagSubscripts != 0 {
-		markChars = append(markChars, '~')
+		filter['~'] = true
 	}
 	if flags&FlagSuperscripts != 0 {
-		markChars = append(markChars, '^')
+		filter['^'] = true
 	}
 	if flags&FlagLatexMathSpans != 0 {
-		markChars = append(markChars, '$')
+		filter['$'] = true
 	}
 	if flags&FlagSpoilers != 0 {
-		markChars = append(markChars, '|')
+		filter['|'] = true
 	}
 	if flags&FlagHighlight != 0 {
-		markChars = append(markChars, '=')
+		filter['='] = true
 	}
 
 	// Analyze marks within the link content range
-	lastEnd := 0
-	if markBeg < len(ms.marks) {
-		lastEnd = ms.marks[markBeg].Beg
-	}
-
-	for i := markBeg; i < markEnd && i < len(ms.marks); i++ {
-		mark := &ms.marks[i]
-
-		// Skip resolved spans
-		if mark.Flags&markResolved != 0 {
-			if mark.Flags&markOpener != 0 && mark.Next >= 0 {
-				i = mark.Next
-			}
-			continue
-		}
-
-		// Skip dummy marks
-		if mark.Ch == 'D' {
-			continue
-		}
-
-		// Skip marks not in the filter set
-		if !isInMarkChars(mark.Ch, markChars) {
-			continue
-		}
-
-		if mark.Beg < lastEnd {
-			continue
-		}
-
-		// Analyze by type
-		switch mark.Ch {
-		case '&':
-			ms.analyzeEntity(blockText, i)
-		case '*', '_':
-			ms.analyzeEmph(i)
-		case '~':
-			ms.analyzeTilde(i)
-		case '^':
-			ms.analyzeCaret(i)
-		case '$':
-			ms.analyzeDollar(i)
-		case '|':
-			ms.analyzeSpoiler(i)
-		case '=':
-			ms.analyzeHighlight(i)
-		}
-
-		if mark.Flags&markResolved != 0 {
-			if mark.Flags&markOpener != 0 && mark.Next >= 0 {
-				lastEnd = ms.marks[mark.Next].End
-			} else {
-				lastEnd = mark.End
-			}
-		}
-	}
+	ms.analyzeMarksRange(blockText, markBeg, markEnd, filter, [256]bool{}, false, 0)
 
 	// Clear opener stacks after link contents analysis (md4c:4697-4698)
 	for i := range ms.stacks {
@@ -698,18 +646,20 @@ func (ms *markStacks) analyzeLinkContents(blockText []byte, markBeg, markEnd int
 	// not to cross any (previously) resolved marks when doing so.
 	// Mirrors md4c md_analyze_link_contents() (md4c.c:4680-4695).
 	if flags&(FlagPermissiveURLAutolinks|FlagPermissiveEmailAutolinks|FlagPermissiveWWWAutolinks) != 0 {
-		var autolinkMarkChars []byte
+		var autolinkFilter [256]bool
 		if flags&FlagPermissiveEmailAutolinks != 0 {
-			autolinkMarkChars = append(autolinkMarkChars, '@')
+			autolinkFilter['@'] = true
 		}
 		if flags&FlagPermissiveURLAutolinks != 0 {
-			autolinkMarkChars = append(autolinkMarkChars, ':')
+			autolinkFilter[':'] = true
 		}
 		if flags&FlagPermissiveWWWAutolinks != 0 {
-			autolinkMarkChars = append(autolinkMarkChars, '.')
+			autolinkFilter['.'] = true
 		}
 
-		ms.analyzeMarksPass(blockText, markBeg, markEnd, autolinkMarkChars, markChars, flags)
+		// noskip: the emphasis/entity chars so we don't expand into resolved spans.
+		// The `filter` set from above serves as the noskip set.
+		ms.analyzeMarksRange(blockText, markBeg, markEnd, autolinkFilter, filter, true, flags)
 	}
 }
 

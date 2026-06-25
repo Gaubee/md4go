@@ -331,10 +331,13 @@ Major differences can be aligned via the `GoldmarkCompat` preset:
 |---|---|---|
 | Tables cannot interrupt a paragraph (GFM standard) | `FlagTableInterruptParagraph` | Paragraph followed by a table: not recognized as a table by default; with the flag, the last line of the paragraph is promoted to the table header |
 | HTML entity decoding | `FlagDecodeEntities` | `&amp; &copy;`: entities kept as text by default; decoded to `& ©` with the flag |
-| Strict table column count validation | `FlagStrictTableColumns` | Header 3 cols, delimiter 2 cols: loosely recognized by default; not recognized as a table with the flag |
+| Leading UTF-8 BOM stripping | `FlagStripBOM` | `\ufeffHello`: BOM preserved by default; stripped with the flag (goldmark behavior) |
+| Strikethrough `~~` intraword (md4c stricter than cmark-gfm) | `FlagStrikethroughPermissive` | `foo~~bar~~baz`: `~~` not recognized intraword by default (md4c behavior); recognized with the flag (cmark-gfm/goldmark behavior) |
+| Inline HTML tag stripping (text renderer) | `FlagStripHTMLTags` | `<span>html</span>`: raw HTML preserved by default; tags stripped to `html` with the flag. Non-visible elements (`<script>`, `<style>`, etc.) have their entire content removed, matching goquery DOM text extraction |
+| Strict table column count validation | `FlagStrictTableColumns` (not in preset) | Header 3 cols, delimiter 2 cols: loosely recognized by default; not recognized as a table with the flag. Excluded from `GoldmarkCompat` because md4go's validation is stricter than goldmark's pad/truncate strategy |
 | Inline span / bracket extra spaces | — | Side effect of goldmark's DOM traversal, should not be replicated |
 
-> See `DIFF_REPORT.md` for the full comparison report.
+> See `DIFFCHECK_REPORT.md` for the full comparison report.
 
 ## Project Documentation
 

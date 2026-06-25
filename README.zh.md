@@ -331,10 +331,13 @@ md4go 默认遵循 GFM/CommonMark 标准。与其他实现的差异分两类：*
 |---|---|---|
 | 表格不可中断段落（GFM 标准） | `FlagTableInterruptParagraph` | 段落后接表格：默认不识别为表格；设 flag 后段落末行提升为表头 |
 | HTML 实体解码 | `FlagDecodeEntities` | `&amp; &copy;`：默认保留实体文本；设 flag 后解码为 `& ©` |
-| 表格列数严格校验 | `FlagStrictTableColumns` | 标题 3 列、分隔行 2 列：默认宽松识别；设 flag 后不识别为表格 |
+| 剥离首部 UTF-8 BOM | `FlagStripBOM` | `\ufeffHello`：默认保留 BOM；设 flag 后剥离（goldmark 行为） |
+| 删除线 `~~` 词内识别（md4c 比 cmark-gfm 更严格） | `FlagStrikethroughPermissive` | `foo~~bar~~baz`：默认不识别词内 `~~`（md4c 行为）；设 flag 后识别（cmark-gfm/goldmark 行为） |
+| 内联 HTML 标签剥离（text 渲染器） | `FlagStripHTMLTags` | `<span>html</span>`：默认保留原始 HTML；设 flag 后剥离标签为 `html`。非可见元素（`<script>`、`<style>` 等）整个内容移除，匹配 goquery DOM 文本提取行为 |
+| 表格列数严格校验 | `FlagStrictTableColumns`（不在预设中） | 标题 3 列、分隔行 2 列：默认宽松识别；设 flag 后不识别为表格。已从 `GoldmarkCompat` 移除，因 md4go 校验比 goldmark 的补齐/截断策略更严格 |
 | 行内跨度/括号多余空格 | — | goldmark DOM 遍历副作用，不应复制 |
 
-> 完整对比报告见 `DIFF_REPORT.md`。
+> 完整对比报告见 `DIFFCHECK_REPORT.md`。
 
 ## 项目文档
 
