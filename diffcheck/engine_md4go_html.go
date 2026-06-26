@@ -86,27 +86,3 @@ func (e *Md4goHTMLEngine) Convert(ctx context.Context, input []byte) (string, er
 	})
 	return result, err
 }
-
-// simpleHTMLText extracts text from HTML by stripping tags — a fallback
-// for when goquery's DOM parser rejects the input (deep nesting limit).
-// Inserts a space at each tag boundary to preserve word separation, then
-// collapses whitespace. Uses parser.ScanHTMLTag for HTML construct detection.
-func simpleHTMLText(htmlBytes []byte) string {
-	var out []byte
-	i := 0
-	for i < len(htmlBytes) {
-		if htmlBytes[i] != '<' {
-			out = append(out, htmlBytes[i])
-			i++
-			continue
-		}
-		if end := parser.ScanHTMLTag(htmlBytes, i); end > i {
-			out = append(out, ' ')
-			i = end
-		} else {
-			out = append(out, '<')
-			i++
-		}
-	}
-	return strings.Join(strings.Fields(string(out)), " ")
-}

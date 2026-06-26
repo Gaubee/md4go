@@ -20,6 +20,7 @@ func main() {
 	dialect := flag.String("dialect", "github", "markdown dialect: github or commonmark")
 	compat := flag.String("compat", "none", "md4go compat mode: none or goldmark")
 	withMd4goHTML := flag.Bool("md4go-html", false, "include md4go-html engine (md4go→HTML→goquery text pipeline)")
+	withMd4cHTML := flag.Bool("md4c-html", false, "include md4c-html engine (md4c→HTML→goquery text pipeline)")
 	outputPath := flag.String("output", "", "write report to this file instead of stdout")
 	verbose := flag.Bool("v", false, "show identical cases too")
 	flag.Parse()
@@ -50,12 +51,14 @@ func main() {
 	// Build md4go base flags based on dialect.
 	var md4goFlags diffcheck.Flags
 	var md4cOpts []diffcheck.Md4cEngineOption
+	var md4cHTMLOpts []diffcheck.Md4cHTMLEngineOption
 	var goldmarkOpts []diffcheck.GoldmarkEngineOption
 
 	switch *dialect {
 	case "commonmark":
 		md4goFlags = diffcheck.DialectCommonMarkFlags
 		md4cOpts = append(md4cOpts, diffcheck.WithMd4cCommonMark())
+		md4cHTMLOpts = append(md4cHTMLOpts, diffcheck.WithMd4cHTMLCommonMark())
 		goldmarkOpts = append(goldmarkOpts, diffcheck.WithGoldmarkCommonMark())
 	case "github":
 		md4goFlags = diffcheck.DialectGitHubFlags
@@ -116,6 +119,16 @@ func main() {
 	// Optional: md4go-html engine (md4go→HTML→goquery text, same pipeline as goldmark)
 	if *withMd4goHTML {
 		engines = append(engines, diffcheck.NewMd4goHTMLEngine(*timeout, diffcheck.WithMd4goHTMLFlags(md4goFlags)))
+	}
+
+	// Optional: md4c-html engine (md4c→HTML→goquery text, same pipeline as goldmark)
+	if *withMd4cHTML {
+		md4cHexg, err := diffcheck.NewMd4cHTMLEngine(*timeout, md4cHTMLOpts...)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		} else {
+			engines = append(engines, md4cHexg)
+		}
 	}
 
 	md4cEng, err := diffcheck.NewMd4cEngine(*timeout, md4cOpts...)

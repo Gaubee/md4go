@@ -84,18 +84,3 @@ func (e *GoldmarkEngine) Convert(ctx context.Context, input []byte) (string, err
 	})
 	return result, err
 }
-
-// walkNodes recursively traverses DOM nodes, extracting text content.
-// Ported from common_test/markdown/strip.go.
-func walkNodes(s *goquery.Selection, result *[]string) {
-	s.Contents().Each(func(i int, node *goquery.Selection) {
-		if goquery.NodeName(node) == "#text" {
-			txt := strings.TrimSpace(node.Text())
-			if txt != "" {
-				*result = append(*result, txt)
-			}
-		} else {
-			walkNodes(node, result)
-		}
-	})
-}

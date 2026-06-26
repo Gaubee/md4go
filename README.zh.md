@@ -135,7 +135,25 @@ text.ConvertStream(file, os.Stdout, text.WithFlags(parser.DialectGitHub))
 
 > **注意**：流式模式下 refdef（引用链接定义）遵循"先见先得"规则，前向引用会退化为字面文本。一次性解析（`Convert`）无此限制。
 
-### 场景 4：自定义渲染器（结构化数据提取）
+### 场景 4：WebAssembly（浏览器端）
+
+md4go 可编译为 WebAssembly，在浏览器端直接解析 Markdown。详见 [`wasm/README.md`](wasm/README.md)。
+
+```html
+<script type="module">
+  import { initMd4go } from './wasm/md4go.js';
+  const { parseToHTML, parseToText } = await initMd4go();
+  console.log(parseToHTML("# Hello **world**"));
+</script>
+```
+
+```bash
+# 构建
+GOOS=js GOARCH=wasm go build -o md4go.wasm ./wasm
+cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" .
+```
+
+### 场景 5：自定义渲染器（结构化数据提取）
 
 ```go
 // 提取所有链接
@@ -348,6 +366,9 @@ md4go 默认遵循 GFM/CommonMark 标准。与其他实现的差异分两类：*
 | ARCHITECTURE.md | 根目录 | 架构设计 |
 | DESIGN.md | 根目录 | 算法设计细节 |
 | TESTING.md | 根目录 | 测试体系说明 |
+| wasm/README.md | wasm/ | WebAssembly 浏览器端使用指南 |
+| diffcheck/README.md | diffcheck/ | 引擎对拍工具文档 |
+| DIFFCHECK_REPORT.md | 根目录 | 引擎对比报告（md4go / md4c / goldmark） |
 
 ## 致谢
 

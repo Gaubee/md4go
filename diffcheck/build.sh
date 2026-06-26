@@ -74,6 +74,15 @@ build_c() {
     echo "  → $CSRC_DIR/md4c-plain"
 }
 
+# ── C binary: md4c-html ───────────────────────────────────────────
+build_c_html() {
+    ensure_md4c "$1"
+    echo "Compiling md4c-html..."
+    gcc -O2 -I"$MD4C_SRC" -o "$CSRC_DIR/md4c-html" \
+        "$CSRC_DIR/main_html.c" "$MD4C_SRC/md4c.c" "$MD4C_SRC/md4c-html.c" "$MD4C_SRC/entity.c"
+    echo "  → $CSRC_DIR/md4c-html"
+}
+
 # ── Go CLI: diffcheck ─────────────────────────────────────────────
 build_go() {
     echo "Building diffcheck CLI..."
@@ -86,19 +95,21 @@ build_go() {
 case "${1:-}" in
     --c-only)
         build_c ""
+        build_c_html ""
         ;;
     --go-only)
         build_go
         ;;
     --update)
         build_c "update"
+        build_c_html "update"
         build_go
         echo ""
         echo "Build complete. Run: ./diffcheck --help"
         ;;
     --clean)
         echo "Removing build artifacts and cached md4c checkout..."
-        rm -f "$CSRC_DIR/md4c-plain" "$SCRIPT_DIR/diffcheck"
+        rm -f "$CSRC_DIR/md4c-plain" "$CSRC_DIR/md4c-html" "$SCRIPT_DIR/diffcheck"
         rm -rf "$MD4C_REPO_DIR"
         echo "Cleaned."
         ;;
@@ -107,6 +118,7 @@ case "${1:-}" in
         ;;
     *)
         build_c ""
+        build_c_html ""
         build_go
         echo ""
         echo "Build complete. Run: ./diffcheck --help"

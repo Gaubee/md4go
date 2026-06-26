@@ -135,7 +135,25 @@ text.ConvertStream(file, os.Stdout, text.WithFlags(parser.DialectGitHub))
 
 > **Note**: In streaming mode, reference link definitions (refdefs) follow a "first-seen-first-served" rule — forward references degrade to literal text. One-shot parsing (`Convert`) has no such limitation.
 
-### Scenario 4: Custom Renderer (Structured Data Extraction)
+### Scenario 4: WebAssembly (Browser)
+
+md4go compiles to WebAssembly for browser-side Markdown parsing. See [`wasm/README.md`](wasm/README.md) for details.
+
+```html
+<script type="module">
+  import { initMd4go } from './wasm/md4go.js';
+  const { parseToHTML, parseToText } = await initMd4go();
+  console.log(parseToHTML("# Hello **world**"));
+</script>
+```
+
+```bash
+# Build
+GOOS=js GOARCH=wasm go build -o md4go.wasm ./wasm
+cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" .
+```
+
+### Scenario 5: Custom Renderer (Structured Data Extraction)
 
 ```go
 // Extract all links
@@ -348,6 +366,9 @@ Major differences can be aligned via the `GoldmarkCompat` preset:
 | ARCHITECTURE.md | root | Architecture design |
 | DESIGN.md | root | Algorithm design details |
 | TESTING.md | root | Testing system overview |
+| wasm/README.md | wasm/ | WebAssembly browser usage guide |
+| diffcheck/README.md | diffcheck/ | Engine cross-comparison tool docs |
+| DIFFCHECK_REPORT.md | root | Engine comparison report (md4go / md4c / goldmark) |
 
 ## Acknowledgments
 

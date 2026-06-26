@@ -3,6 +3,8 @@ package diffcheck
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +99,101 @@ func TestDiffCheckJSONLAlignment(t *testing.T) {
 	}
 
 	runMd4cAlignmentCheck(t, cases, NormalizeLoose, 64, "JSONL default")
+}
+
+// TestDiffCheckThreeHTMLJSONL runs md4go-html(goldmark-compat), md4c-html, and
+// goldmark on the full JSONL dataset with the same HTML→goquery pipeline.
+// Counts per-pair diffs for statistical analysis. Does not fail — logs only.
+// Skipped in short mode (subprocess per case makes it slow).
+func TestDiffCheckThreeHTMLJSONL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping three-html JSONL test in short mode")
+	}
+
+	_, thisFile, _, _ := runtime.Caller(0)
+	dir := filepath.Join(filepath.Dir(thisFile), "data")
+
+	var allCases []TestCase
+	for _, name := range []string{"aidata_content.jsonl", "testdata1.jsonl", "testdata2.jsonl"} {
+		p := filepath.Join(dir, name)
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		cases, err := LoadJSONL(p)
+		if err != nil {
+			t.Logf("skip %s: %v", name, err)
+			continue
+		}
+		allCases = append(allCases, cases...)
+	}
+	if len(allCases) == 0 {
+		t.Skip("no JSONL data available")
+	}
+
+	engines := []Engine{
+		NewMd4goHTMLEngine(testTimeout, WithMd4goHTMLFlags(DialectGitHubFlags|GoldmarkCompatFlags)),
+	}
+	md4cHeng, err := NewMd4cHTMLEngine(testTimeout)
+	if err != nil {
+		t.Skipf("md4c-html engine unavailable: %v", err)
+	}
+	engines = append(engines, md4cHeng)
+	engines = append(engines, NewGoldmarkEngine(testTimeout))
+
+	pairStats := runThreeHTMLPairDiagnostics(t, allCases, NormalizeLoose, engines)
+	t.Logf("JSONL %d cases: md4go≠md4c %d | md4go≠goldmark %d | md4c≠goldmark %d",
+		len(allCases),
+		pairStats["md4go≠md4c"],
+		pairStats["md4go≠goldmark"],
+		pairStats["md4c≠goldmark"])
+}
+
+// TestDiffCheckMd4cHTMLAlignment verifies md4go-html(goldmark-compat) aligns
+// with md4c-html on fuzz seeds, using the same HTML→goquery pipeline for both.
+// This isolates pure parser-level differences between Go (md4go) and C (md4c)
+// implementations without pipeline noise.
+func TestDiffCheckMd4cHTMLAlignment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping md4c-html test in short mode")
+	}
+
+	cases := LoadFuzzSeeds()
+
+	engines := []Engine{
+		NewMd4goHTMLEngine(testTimeout, WithMd4goHTMLFlags(DialectGitHubFlags|GoldmarkCompatFlags)),
+	}
+	md4cHeng, err := NewMd4cHTMLEngine(testTimeout)
+	if err != nil {
+		t.Skipf("md4c-html engine unavailable: %v", err)
+	}
+	engines = append(engines, md4cHeng)
+
+	// Cross-implementation diff baseline — expected to be extremely low
+	runDiagnosticCheckWithEngines(t, cases, NormalizeLoose, engines)
+}
+
+// TestDiffCheckThreeHTMLDiagnostics runs md4go-html(goldmark-compat),
+// md4c-html, and goldmark simultaneously on fuzz seeds with the same
+// HTML→goquery pipeline. Logs all pairwise diffs for diagnostic analysis
+// without failing.
+func TestDiffCheckThreeHTMLDiagnostics(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping three-html test in short mode")
+	}
+
+	cases := LoadFuzzSeeds()
+
+	engines := []Engine{
+		NewMd4goHTMLEngine(testTimeout, WithMd4goHTMLFlags(DialectGitHubFlags|GoldmarkCompatFlags)),
+	}
+	md4cHeng, err := NewMd4cHTMLEngine(testTimeout)
+	if err != nil {
+		t.Skipf("md4c-html engine unavailable: %v", err)
+	}
+	engines = append(engines, md4cHeng)
+	engines = append(engines, NewGoldmarkEngine(testTimeout))
+
+	runDiagnosticCheckWithEngines(t, cases, NormalizeLoose, engines)
 }
 
 // runMd4cAlignmentCheck runs md4go and md4c engines and fails if md4go≠md4c
@@ -196,6 +293,59 @@ func runDiagnosticCheckWithEngines(t *testing.T, cases []TestCase, mode Normaliz
 	}
 
 	t.Logf("%d cases, %d diffs (diagnostic, normalize=%v)", len(cases), diffCount, mode)
+}
+
+// runThreeHTMLPairDiagnostics runs the given engines and returns per-pair diff
+// counts without failing. Disables verbose diff logging (only final stats).
+func runThreeHTMLPairDiagnostics(t *testing.T, cases []TestCase, mode NormalizeMode, engines []Engine) map[string]int {
+	t.Helper()
+
+	stats := map[string]int{
+		"md4go≠md4c":    0,
+		"md4go≠goldmark": 0,
+		"md4c≠goldmark":  0,
+	}
+	timeouts := 0
+	errors := 0
+
+	for _, tc := range cases {
+		cr := RunCase(context.Background(), engines, tc, mode)
+
+		for _, err := range cr.Errors {
+			if err != nil {
+				if IsTimeout(err) {
+					timeouts++
+				} else {
+					errors++
+				}
+			}
+		}
+
+		for _, p := range cr.Pairs {
+			if p == nil || p.Same {
+				continue
+			}
+			a, b := p.NameA, p.NameB
+			// Use prefix-based matching to handle (commonmark) / (goldmark-compat) variants
+			switch {
+			case (strings.HasPrefix(a, "md4go") && strings.HasPrefix(b, "md4c")):
+				fallthrough
+			case (strings.HasPrefix(a, "md4c") && strings.HasPrefix(b, "md4go")):
+				stats["md4go≠md4c"]++
+			case (strings.HasPrefix(a, "md4go") && strings.HasPrefix(b, "goldmark")):
+				fallthrough
+			case (strings.HasPrefix(a, "goldmark") && strings.HasPrefix(b, "md4go")):
+				stats["md4go≠goldmark"]++
+			case (strings.HasPrefix(a, "md4c") && strings.HasPrefix(b, "goldmark")):
+				fallthrough
+			case (strings.HasPrefix(a, "goldmark") && strings.HasPrefix(b, "md4c")):
+				stats["md4c≠goldmark"]++
+			}
+		}
+	}
+
+	t.Logf("(%d cases, %d timeouts, %d errors)", len(cases), timeouts, errors)
+	return stats
 }
 
 // isMd4goMd4cPair returns true if the pair is between md4go and md4c engines.

@@ -841,12 +841,14 @@ func collectCodeSpanMark(ms *markStacks, text []byte, off int, cc compatConfig) 
 	for off+actualLen < len(text) && text[off+actualLen] == '`' {
 		actualLen++
 	}
-	// Mark length is capped at codespanMaxLen to prevent O(n²),
+	// Mark length is capped at cc.codespanMaxLen to prevent O(n²),
 	// but we must advance past the entire backtick sequence.
 	// Mirrors md4c: off = codespan_end (past all backticks), even if n_backticks is capped.
+	// Default: 1024 (CommonMark-compliant). When FlagStrictCodeSpanLimit is set: 32 (md4c-compatible).
+	maxLen := cc.codespanMaxLen
 	openerLen := actualLen
-	if openerLen > codespanMaxLen {
-		openerLen = codespanMaxLen
+	if openerLen > maxLen {
+		openerLen = maxLen
 	}
 
 	actualEnd := off + actualLen // the real end of the backtick sequence

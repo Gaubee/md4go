@@ -12,7 +12,7 @@ const (
 	htmlBlockType2 uint8 = 2
 	// Type 3: <? — ends with ?>.
 	htmlBlockType3 uint8 = 3
-	// Type 4: <! followed by A-Z — ends with >.
+	// Type 4: <! followed by ASCII letter — ends with >.
 	htmlBlockType4 uint8 = 4
 	// Type 5: <![CDATA[ — ends with ]]>.
 	htmlBlockType5 uint8 = 5
@@ -80,14 +80,14 @@ func detectHTMLBlockStart(line []byte) (uint8, bool) {
 		return htmlBlockType3, true
 	}
 
-	// Type 4: <! followed by uppercase letter
-	if off+1 < len(line) && line[off] == '!' && line[off+1] >= 'A' && line[off+1] <= 'Z' {
-		return htmlBlockType4, true
-	}
-
-	// Type 5: <![CDATA[
+	// Type 5: <![CDATA[ — checked before Type 4 to avoid false match on ![C.
 	if off+7 < len(line) && string(line[off:off+8]) == "![CDATA[" {
 		return htmlBlockType5, true
+	}
+
+	// Type 4: <! followed by ASCII letter (CommonMark §4.6, case-insensitive).
+	if off+1 < len(line) && line[off] == '!' && isAlpha(line[off+1]) {
+		return htmlBlockType4, true
 	}
 
 	// Type 6: <tag or </tag where tag is a known block-level element

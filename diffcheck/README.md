@@ -6,9 +6,13 @@
 
 | 引擎 | 实现方式 | 说明 |
 |---|---|---|
-| **md4go** | Go API 直接调用 | 本项目主引擎 |
-| **md4c** | `exec.CommandContext` 调用 C 子进程 | 参考实现（GFM 模式） |
+| **md4go** | Go API 直接调用 | 本项目主引擎（text 直渲管线） |
+| **md4go-html** | md4go→HTML→goquery 提取 | md4go 的 HTML 管线（通过 `--md4go-html` 启用） |
+| **md4c** | `exec.CommandContext` 调用 C 子进程 | 参考实现（text 直渲管线，GFM 模式） |
+| **md4c-html** | `exec.CommandContext` 调用 C 子进程（md4c-html） | 🆕 md4c 的 HTML 管线（通过 `--md4c-html` 启用） |
 | **goldmark** | goldmark→HTML→goquery 提取文本 | 第三方 Go 库，会丢失 HTML 块和图片文本 |
+
+三条 HTML 管线引擎（md4go-html、md4c-html、goldmark）统一使用 `HTML→goquery→walkNodes` 提取路径，消除管线架构噪声，仅暴露纯解析器差异。
 
 ## 前置条件
 
@@ -70,6 +74,8 @@ go run ./cmd/diffcheck --normalize=strict   # strict 模式（保留换行语义
 go run ./cmd/diffcheck --normalize=loose    # loose 模式（折叠空白，默认）
 go run ./cmd/diffcheck --timeout=30s        # 加大超时（长输入场景）
 go run ./cmd/diffcheck -v                   # 显示一致的用例
+go run ./cmd/diffcheck --md4go-html         # 启用 md4go HTML 管线引擎
+go run ./cmd/diffcheck --md4c-html          # 启用 md4c HTML 管线引擎（三引擎同管道诊断）
 ```
 
 退出码：0 = 全部一致，1 = 存在差异。
@@ -274,9 +280,12 @@ diffcheck/
 ├── go.mod
 ├── build.sh               # 一键构建脚本 (C + Go)
 ├── engine.go              # Engine 接口 + RunWithTimeout
-├── engine_md4go.go        # md4go 引擎
-├── engine_md4c.go         # md4c 子进程引擎
-├── engine_goldmark.go     # goldmark strip 引擎
+├── engine_md4go.go        # md4go text 引擎
+├── engine_md4go_html.go   # md4go HTML 管线引擎
+├── engine_md4c.go         # md4c text 子进程引擎
+├── engine_md4c_html.go    # md4c HTML 管线引擎 (🆕)
+├── engine_goldmark.go     # goldmark 引擎
+├── engine_goquery.go      # walkNodes + simpleHTMLText (共享函数)
 ├── diff.go                # 归一化 + LCS diff + 报告格式化
 ├── flags.go               # 导出 parser.Flags 常量供 CLI 使用
 ├── loader.go              # JSONL 解析 + fuzz/constructed 种子
@@ -289,5 +298,7 @@ diffcheck/
 │   └── example.jsonl          # 格式演示文件（13 条样例，见上文）
 └── csrc/
     ├── main.c             # md4c-plain C 源码
-    └── md4c-plain         # 编译产物
+    ├── main_html.c        # md4c-html C 源码 (🆕)
+    ├── md4c-plain         # 编译产物
+    └── md4c-html          # 编译产物 (🆕)
 ```

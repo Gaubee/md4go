@@ -4,16 +4,29 @@ package parser
 // from Flags, avoiding repeated bitmask checks in hot paths.
 type compatConfig struct {
 	protectDoublePipe bool // FlagProtectDoublePipe OR FlagSpoilers: protect || from cell splitting
-	strictTableCols   bool // FlagStrictTableColumns: reject tables whose header has MORE cells than the delimiter (mirrors goldmark's extension/table.go Transform reject path)
+	strictTableCols   bool // FlagStrictTableColumns: reject tables whose header has MORE cells than the delimiter
+	wikilinkProtect   bool // FlagWikilinks: protect [[...]] brackets from | cell splitting in tables
+	codespanMaxLen    int  // maximum backtick delimiter length for code spans (default 1024, md4c compat: 32)
 }
 
 // newCompatConfig builds a compatConfig from parser flags.
 func newCompatConfig(flags Flags) compatConfig {
 	return compatConfig{
-		// || protection is active when either FlagProtectDoublePipe (md4go improvement)
-		// or FlagSpoilers (spoiler syntax requires || as delimiter, not cell boundary) is set.
 		protectDoublePipe: flags&FlagProtectDoublePipe != 0 || flags&FlagSpoilers != 0,
 		strictTableCols:   flags&FlagStrictTableColumns != 0,
+		// [[...]] bracket protection in table cells: only when wikilinks are enabled.
+		// When wikilinks are not enabled, [[...]] is just text and the | inside should
+		// be treated as a table cell separator per GFM standard (aligns with md4c).
+		wikilinkProtect: flags&FlagWikilinks != 0,
+		// Code span backtick delimiter limit: 1024 by default (CommonMark-compliant,
+		// no limit per spec). When FlagStrictCodeSpanLimit is set, restrict to 32
+		// to match md4c's CODESPAN_MARK_MAXLEN (non-standard C limitation).
+		codespanMaxLen: func() int {
+			if flags&FlagStrictCodeSpanLimit != 0 {
+				return 32 // md4c-compatible limit
+			}
+			return 1024 // CommonMark-compliant (no limit per spec)
+		}(),
 	}
 }
 

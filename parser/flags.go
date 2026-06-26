@@ -212,6 +212,19 @@ const (
 	// Default (unset): XHTML-safe encoding — ' → &#x27;, " → &quot;
 	// (matches md4c-html.c). This is the more conservative encoding strategy.
 	FlagNoXHTMLEntityEncoding Flags = 0x4000000
+
+	// FlagStrictCodeSpanLimit restricts the code span backtick delimiter
+	// length to md4c's internal limit (32). CommonMark 0.31 §6.1 imposes
+	// no maximum on backtick string length, so md4go's default limit of
+	// 1024 is standard-compliant and more permissive.
+	//
+	// md4c has a hard-coded CODESPAN_MARK_MAXLEN=32 for per-line mark
+	// buffer sizing (~O(n²) protection). This flag applies the same
+	// constraint for strict md4c alignment.
+	//
+	// Default (unset): 1024 backtick limit (CommonMark-compliant).
+	// When set: 32 backtick limit (md4c-compatible, non-standard).
+	FlagStrictCodeSpanLimit Flags = 0x8000000
 )
 
 // ═══════════════════════════════════════════════════════════════

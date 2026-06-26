@@ -124,14 +124,33 @@ func (ms *markStacks) analyzePermissiveAutolink(blockText []byte, markIndex int,
 		}
 	}
 
-	// Success — resolve as permissive autolink.
-	// Mirrors md4c.c:4538-4544
+	// Save original opener position before backward expansion.
+	originalOpenerBeg := opener.Beg
+
+	// Resolve as permissive autolink.
 	opener.Beg = beg
 	opener.End = beg
 	closer.Beg = end
 	closer.End = end
 	closer.Ch = opener.Ch
 	ms.resolveRange(markIndex, markIndex+1)
+
+	// Disable intermediate marks within the backward-expanded username range
+	// (e.g. '_' from email usernames). Otherwise processInlines would emit
+	// their text as plain content before the <a> wrapper.
+	for i := markIndex - 1; i >= 0; i-- {
+		m := &ms.marks[i]
+		if m.Ch == 'D' {
+			continue
+		}
+		if m.Beg >= opener.Beg && m.Beg < originalOpenerBeg {
+			m.Ch = 'D'
+			m.Flags = 0
+		}
+		if m.End <= opener.Beg {
+			break
+		}
+	}
 }
 
 // analyzePermissiveAutolinkSegment scans a segment of a permissive autolink.

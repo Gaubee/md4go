@@ -39,7 +39,6 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 	marks := ctx.stk.marks
 
 	// If no marks (or only the sentinel), emit raw text.
-	// This is always the end of a paragraph, so pass isParaEnd=true.
 	if len(marks) <= 1 {
 		p.emitTextWithBreaks(r, blockText, false, false, true)
 		return
@@ -60,12 +59,13 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 			continue
 		}
 
-		// Skip marks that fall before the current position — they were consumed
-		// by a previous expanded span (e.g., the reference part of a full
-		// reference link [text][ref] whose closer.End was expanded).
-		// Mirrors md4c where expanded closer.end causes marks in the reference
-		// part to be skipped during md_process_inlines().
-		if m.Beg < off && m.Ch != 127 {
+		// Skip marks that fall before the current position — consumed by a
+		// previous expanded span (e.g. [text][ref] whose closer.End expanded).
+		// Exception: permissive autolink openers may have expanded Beg < off
+		// (backward username scan); still process them to render the link.
+		isAutoOpener := m.Flags&markOpener != 0 && m.Flags&markResolved != 0 &&
+			(m.Ch == '@' || m.Ch == ':' || m.Ch == '.')
+		if m.Beg < off && m.Ch != 127 && !isAutoOpener {
 			continue
 		}
 
@@ -428,43 +428,43 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 				off = len(blockText)
 
 			case '@', ':', '.':
-				// I30: Permissive autolink (email/URL/WWW).
-				// Mirrors md4c md_process_inlines() case '@',':','.' (md4c.c:4996-5030).
-				// The opener and closer are cross-linked via Prev/Next.
-				// opener.End == opener.Beg (beg of autolink range)
-				// closer.Beg == closer.End (end of autolink range)
-				// The visible text is blockText[opener.Beg:closer.Beg].
+				// Permissive autolink (email/URL/WWW).
+				// The opener/closer are cross-linked via Next/Prev.
+				// opener.Beg == opener.End (start of expanded range)
+				// closer.Beg == closer.End (end of range)
+				// Visible text: blockText[max(m.Beg,off):closer.Beg]
+				// — when Beg was expanded backward past off (email username
+				//   scan), only emit text not already emitted by prior marks).
 				if m.Flags&markOpener != 0 {
 					closerIdx := m.Next
 					if closerIdx >= 0 && closerIdx < len(marks) {
 						closer := &marks[closerIdx]
-
-						// Mark the closer with VALIDPERMISSIVEAUTOLINK so we only
-						// process it after the opener has been processed.
-						// Mirrors md4c.c:5011-5012.
 						closer.Flags |= markValidPermissiveAutolink
 
-						// Build the destination: the text between opener.Beg and closer.Beg
-						dest := blockText[m.Beg:closer.Beg]
+						// Full dest for href (complete URL/email)
+						fullDest := blockText[m.Beg:closer.Beg]
 
-						// For '@' (email) and '.' (WWW), prepend the appropriate scheme
-						// Mirrors md4c.c:5014-5024
-						href := dest
+						// Only emit visible text portion not yet emitted
+						destStart := m.Beg
+						if destStart < off {
+							destStart = off
+						}
+						dest := blockText[destStart:closer.Beg]
+
+						href := fullDest
 						if m.Ch == '@' || m.Ch == '.' {
 							prefix := "mailto:"
 							if m.Ch == '.' {
 								prefix = "http://"
 							}
-							href = make([]byte, 0, len(prefix)+len(dest))
+							href = make([]byte, 0, len(prefix)+len(fullDest))
 							href = append(href, prefix...)
-							href = append(href, dest...)
+							href = append(href, fullDest...)
 						}
 
-						// Build attribute with noEscapes (permissive autolinks don't resolve backslashes).
 						hrefAttr := BuildAttribute(href, buildAttrNoEscapes)
 						detail := &ast.LinkDetail{Href: hrefAttr, IsAutolink: true}
 						_ = r.EnterSpan(ast.SpanLink, detail)
-						// Emit the visible destination text
 						p.emitTextWithBreaks(r, dest, false, latexDepth > 0)
 						_ = r.LeaveSpan(ast.SpanLink, nil)
 						off = closer.End
@@ -472,10 +472,8 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 						continue
 					}
 				} else if m.Flags&markCloser != 0 {
-					// Closer for permissive autolink — only emit if opener was processed
-					// Mirrors md4c.c:5026-5028
 					if m.Flags&markValidPermissiveAutolink != 0 {
-						// Already handled in the opener case above
+						// Handled in opener case above
 					}
 				}
 				off = m.End
@@ -493,9 +491,6 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 	}
 
 	// Emit any remaining text after the last mark.
-	// This is the final text segment of the paragraph, so we strip trailing
-	// whitespace per CommonMark spec. Use isParaEnd=true so the last line
-	// of the text has its trailing spaces stripped.
 	if off < len(blockText) {
 		p.emitTextWithBreaks(r, blockText[off:], false, latexDepth > 0, true)
 	}
@@ -561,15 +556,8 @@ func (p *Parser) emitTextWithBreaks(r renderer.Renderer, text []byte, enforceHar
 		if i == len(text) || text[i] == '\n' {
 			lineText := text[start:i]
 			if len(lineText) > 0 {
-				// Strip trailing spaces at line boundaries and paragraph end.
-				// Mirrors md4c md_analyze_line() (md4c.c:6906-6910): trailing
-				// spaces are trimmed from non-verbatim lines before inline
-				// processing, so text at line boundaries never includes them.
-				//
-				// For partial-line segments (between marks, no trailing '\n'),
-				// trailing spaces are preserved — they're inter-word spaces,
-				// not line trailing spaces.
-				isLineEnd := i < len(text) // there's a '\n' after this segment
+				// Strip trailing spaces at line boundaries per md4c.c:6906-6910.
+				isLineEnd := i < len(text)
 				paraEnd := len(isParaEnd) > 0 && isParaEnd[0] && i == len(text)
 
 				trailingSpaces := countTrailingSpaces(lineText)

@@ -132,14 +132,18 @@ func splitTableCells(line []byte, cc compatConfig) [][]byte {
 	line = bytes.TrimSpace(line)
 
 	// Build a set of byte positions that are "protected" from pipe splitting:
-	// inside code spans and wikilinks.
+	// inside code spans and optionally wikilinks.
 	protected := make([]bool, len(line))
 
 	// 1. Mark positions inside backtick code spans.
 	skipCodeSpans(line, protected)
 
-	// 2. Mark positions inside wikilinks [[...]].
-	skipWikilinks(line, protected)
+	// 2. Mark positions inside wikilinks [[...]] — only when FlagWikilinks is set.
+	//    Per GFM standard, [[...]] without wikilink support is just text, and | inside
+	//    it should be treated as a cell separator (aligns with md4c).
+	if cc.wikilinkProtect {
+		skipWikilinks(line, protected)
+	}
 
 	// 3. Compat: protect || from cell splitting when FlagProtectDoublePipe is set.
 	protectDoublePipeInCells(line, protected, cc.protectDoublePipe)

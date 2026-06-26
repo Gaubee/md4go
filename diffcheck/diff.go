@@ -205,7 +205,7 @@ func FormatCaseReport(cr *CaseResult) string {
 	fmt.Fprintf(&b, "Input: %s\n", escapePreview(inputStr, 200))
 
 	// Each engine's output with line numbers
-	engineOrder := []string{"goldmark", "md4go", "md4go-html", "md4go-html(goldmark-compat)", "md4c"}
+	engineOrder := []string{"goldmark", "goldmark(commonmark)", "md4go", "md4go-html", "md4go-html(goldmark-compat)", "md4c", "md4c(commonmark)", "md4c-html", "md4c-html(commonmark)"}
 	for _, name := range engineOrder {
 		output, ok := cr.Outputs[name]
 		if !ok {
