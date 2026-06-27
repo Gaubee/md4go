@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/userpro/md4go/ast"
@@ -68,6 +70,7 @@ func (r *blockStateRec) Text(_ ast.TextType, b []byte) error {
 // opened in one chunk and closed in another keeps its protected state for the
 // body lines in between — the failure mode of one-shot ParseStream.
 func TestParseStreamContinue_CodeBlockAcrossChunks(t *testing.T) {
+	t.Parallel()
 	// Same logical document split into 3 chunks:
 	//   chunk0: prose + code fence open
 	//   chunk1: code body (must be protected even though it arrives in its own chunk)
@@ -89,15 +92,15 @@ func TestParseStreamContinue_CodeBlockAcrossChunks(t *testing.T) {
 	}
 
 	// The code body must be classified protected; the prose must be lift.
-	joinedProtected := join(rec.protectedTexts)
-	joinedLift := join(rec.liftTexts)
-	if !contains(joinedProtected, "<DSML-INSIDE>") {
+	joinedProtected := strings.Join(rec.protectedTexts, "")
+	joinedLift := strings.Join(rec.liftTexts, "")
+	if !strings.Contains(joinedProtected, "<DSML-INSIDE>") {
 		t.Fatalf("code body must be protected, protectedTexts=%q", rec.protectedTexts)
 	}
-	if !contains(joinedLift, "intro") || !contains(joinedLift, "after") {
+	if !strings.Contains(joinedLift, "intro") || !strings.Contains(joinedLift, "after") {
 		t.Fatalf("prose must be lift, liftTexts=%q", rec.liftTexts)
 	}
-	if contains(joinedLift, "<DSML-INSIDE>") {
+	if strings.Contains(joinedLift, "<DSML-INSIDE>") {
 		t.Fatalf("code body leaked into lift, liftTexts=%q", rec.liftTexts)
 	}
 }
@@ -105,6 +108,7 @@ func TestParseStreamContinue_CodeBlockAcrossChunks(t *testing.T) {
 // TestParseStreamContinue_ParagraphAcrossChunks proves a paragraph split across
 // chunks is emitted as one paragraph (state preserved), not re-opened each chunk.
 func TestParseStreamContinue_ParagraphAcrossChunks(t *testing.T) {
+	t.Parallel()
 	chunks := [][][]byte{
 		{[]byte("word1")},
 		{[]byte("word2")},
@@ -120,9 +124,9 @@ func TestParseStreamContinue_ParagraphAcrossChunks(t *testing.T) {
 	if err := p.ParseStreamEnd(rec); err != nil {
 		t.Fatalf("End: %v", err)
 	}
-	joined := join(rec.liftTexts)
+	joined := strings.Join(rec.liftTexts, "")
 	for _, w := range []string{"word1", "word2", "word3"} {
-		if !contains(joined, w) {
+		if !strings.Contains(joined, w) {
 			t.Fatalf("%q missing from lift text: %q", w, joined)
 		}
 	}
@@ -130,8 +134,11 @@ func TestParseStreamContinue_ParagraphAcrossChunks(t *testing.T) {
 
 // TestParseStreamContinue_MatchesOneShot proves the continuation API produces
 // the same Text events as a one-shot ParseStream of the whole document, when the
-// lines are fed incrementally.
+// lines are fed incrementally. Comparison is element-wise (slices.Equal), not
+// joined-string, so fragment-boundary differences are caught (a joined compare
+// would treat ["a","b"] and ["ab"] as equal — a false negative).
 func TestParseStreamContinue_MatchesOneShot(t *testing.T) {
+	t.Parallel()
 	doc := [][]byte{
 		[]byte("# Heading"),
 		[]byte(""),
@@ -165,19 +172,20 @@ func TestParseStreamContinue_MatchesOneShot(t *testing.T) {
 		t.Fatalf("End: %v", err)
 	}
 
-	if join(cont.liftTexts) != join(oneShot.liftTexts) {
-		t.Fatalf("lift text differs\n one-shot: %q\n continue: %q",
-			join(oneShot.liftTexts), join(cont.liftTexts))
+	if !slices.Equal(cont.liftTexts, oneShot.liftTexts) {
+		t.Fatalf("lift text differs (element-wise)\n one-shot: %q\n continue: %q",
+			oneShot.liftTexts, cont.liftTexts)
 	}
-	if join(cont.protectedTexts) != join(oneShot.protectedTexts) {
-		t.Fatalf("protected text differs\n one-shot: %q\n continue: %q",
-			join(oneShot.protectedTexts), join(cont.protectedTexts))
+	if !slices.Equal(cont.protectedTexts, oneShot.protectedTexts) {
+		t.Fatalf("protected text differs (element-wise)\n one-shot: %q\n continue: %q",
+			oneShot.protectedTexts, cont.protectedTexts)
 	}
 }
 
 // TestParseStreamContinue_ReusableAfterEnd proves End clears state so a fresh
 // stream can be started on the same Parser.
 func TestParseStreamContinue_ReusableAfterEnd(t *testing.T) {
+	t.Parallel()
 	p := New(0)
 	// First stream.
 	rec1 := &blockStateRec{}
@@ -187,32 +195,13 @@ func TestParseStreamContinue_ReusableAfterEnd(t *testing.T) {
 	rec2 := &blockStateRec{}
 	_ = p.ParseStreamContinue(&lineListSource{lines: [][]byte{[]byte("second")}}, rec2)
 	_ = p.ParseStreamEnd(rec2)
-	if !contains(join(rec2.liftTexts), "second") {
+	joined2 := strings.Join(rec2.liftTexts, "")
+	if !strings.Contains(joined2, "second") {
 		t.Fatalf("second stream lost text: %q", rec2.liftTexts)
 	}
-	if contains(join(rec2.liftTexts), "first") {
+	if strings.Contains(joined2, "first") {
 		t.Fatalf("first stream leaked into second: %q", rec2.liftTexts)
 	}
-}
-
-func join(ss []string) string {
-	out := ""
-	for _, s := range ss {
-		out += s
-	}
-	return out
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && indexOf(s, sub) >= 0
-}
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 var _ stream.LineSource = (*lineListSource)(nil)
