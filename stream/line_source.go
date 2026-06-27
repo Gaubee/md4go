@@ -21,27 +21,20 @@ type LineSource interface {
 	// LineNumber returns the 1-based line number of the last line returned
 	// by NextLine, or 0 if no lines have been read yet.
 	LineNumber() int
-
-	// DocEndsWithNewline reports whether the input ends with a newline.
-	// Mirrors md4c's ctx.doc_ends_with_newline.
-	// Only reliable after all lines have been read (ok == false).
-	DocEndsWithNewline() bool
 }
 
 // SliceSource implements LineSource over a []byte — used by Convert.
 // The backing []byte persists for the full parse, so returned slices
 // can be direct references (zero-copy).
 type SliceSource struct {
-	src                []byte
-	off                int
-	lineNum            int
-	docEndsWithNewline bool
+	src     []byte
+	off     int
+	lineNum int
 }
 
 // NewSliceSource creates a LineSource backed by a []byte.
 func NewSliceSource(src []byte) *SliceSource {
-	ends := len(src) > 0 && (src[len(src)-1] == '\n' || src[len(src)-1] == '\r')
-	return &SliceSource{src: src, docEndsWithNewline: ends}
+	return &SliceSource{src: src}
 }
 
 // NextLine returns the next line from the byte slice.
@@ -70,17 +63,11 @@ func (s *SliceSource) NextLine() (line []byte, ok bool, err error) {
 // LineNumber returns the 1-based number of the last line read.
 func (s *SliceSource) LineNumber() int { return s.lineNum }
 
-// DocEndsWithNewline reports whether the input ended with a newline.
-func (s *SliceSource) DocEndsWithNewline() bool { return s.docEndsWithNewline }
-
 // ReaderSource implements LineSource over an io.Reader — used by ConvertStream.
 // Each NextLine call returns a stable copy (not a view into the Scanner buffer).
 type ReaderSource struct {
-	scanner            *bufio.Scanner
-	lineNum            int
-	lastLine           []byte // last line returned, for trailing-newline detection
-	docEndsWithNewline bool
-	done               bool
+	scanner *bufio.Scanner
+	lineNum int
 }
 
 // NewReaderSource creates a LineSource backed by an io.Reader.
@@ -100,36 +87,14 @@ func NewReaderSource(r io.Reader) *ReaderSource {
 // iteration — without copying, stored lines would be corrupted.
 func (rs *ReaderSource) NextLine() (line []byte, ok bool, err error) {
 	if !rs.scanner.Scan() {
-		rs.done = true
-		// If the last line was non-empty and didn't end with newline,
-		// the document doesn't end with newline.
-		// bufio.Scanner strips the trailing \n, so if the last call
-		// returned a line, it was newline-terminated (or last line of file).
-		// We track via the last line's content — if it was empty, the
-		// previous line had a trailing newline.
 		return nil, false, rs.scanner.Err()
 	}
 	raw := rs.scanner.Bytes()
 	// Must copy: scanner.Bytes() is only valid until next Scan().
 	line = append([]byte(nil), raw...)
 	rs.lineNum++
-	rs.lastLine = line
 	return line, true, nil
 }
 
 // LineNumber returns the 1-based number of the last line read.
 func (rs *ReaderSource) LineNumber() int { return rs.lineNum }
-
-// DocEndsWithNewline reports whether the input ended with a newline.
-// For ReaderSource, this is a best-effort heuristic: if the last line
-// returned by Scanner was empty (meaning the file ended with \n\n or \n),
-// the document ends with a newline. Otherwise, it may or may not.
-// This is less precise than SliceSource, but sufficient for plaintext
-// rendering where trailing newline handling is a minor concern.
-func (rs *ReaderSource) DocEndsWithNewline() bool {
-	if !rs.done {
-		return false
-	}
-	// If the last line was empty, the input ended with \n
-	return len(rs.lastLine) == 0
-}

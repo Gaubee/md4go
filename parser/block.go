@@ -1020,6 +1020,14 @@ func (p *Parser) emitBlock(ctx *context, b *Block, r renderer.Renderer) {
 
 	switch b.Type {
 	case ast.BlockH, ast.BlockP:
+		if ctx.noInline {
+			// ParseBlocksOnly fast path: skip the entire inline analysis
+			// pipeline (collectMarks → analyzeMarks → resolveBrackets →
+			// analyzeLinkContents → processInlines). No Span or inline Text
+			// events emitted; only the EnterBlock/LeaveBlock pair for the
+			// block's structural identity.
+			break
+		}
 		// Inline-capable blocks: use the mark pipeline for inline analysis.
 		// Mirrors md4c md_process_all_blocks() → md_analyze_inlines + md_process_inlines.
 		// blockText is assembled once and passed to processBlockInlines, which runs
@@ -1029,6 +1037,12 @@ func (p *Parser) emitBlock(ctx *context, b *Block, r renderer.Renderer) {
 		// Reset marks for next block (memory does not accumulate across blocks)
 		ctx.stk.reset()
 	case ast.BlockTable:
+		if ctx.noInline {
+			// ParseBlocksOnly fast path: skip table cell inline processing.
+			// emitTable would otherwise call processCellInline →
+			// processBlockInlines for every cell.
+			break
+		}
 		// Table block: process rows and cells.
 		// Mirrors md4c md_process_table_block_contents().
 		p.emitTable(ctx, b, r)

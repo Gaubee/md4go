@@ -93,7 +93,7 @@ func TestCollectMarksSuperscriptLineBoundary(t *testing.T) {
 			ms.reset()
 			mc := fullMarkChars()
 			mc['^'] = true
-			collectMarks(ms, []byte(tt.input), &mc, FlagSuperscripts)
+			collectMarks(ms, []byte(tt.input), &mc, newCompatConfig(FlagSuperscripts), FlagSuperscripts)
 
 			carets := findMarksByCh(ms, '^')
 			if len(carets) != tt.wantMarks {
@@ -152,7 +152,7 @@ func TestCollectMarksDollarLineBoundary(t *testing.T) {
 			ms.reset()
 			mc := fullMarkChars()
 			mc['$'] = true
-			collectMarks(ms, []byte(tt.input), &mc, FlagLatexMathSpans)
+			collectMarks(ms, []byte(tt.input), &mc, newCompatConfig(FlagLatexMathSpans), FlagLatexMathSpans)
 
 			dollars := findMarksByCh(ms, '$')
 			if len(dollars) != tt.wantMarks {
@@ -197,7 +197,7 @@ func TestCollectMarksHighlightLineBoundary(t *testing.T) {
 			ms.reset()
 			mc := fullMarkChars()
 			mc['='] = true
-			collectMarks(ms, []byte(tt.input), &mc, FlagHighlight)
+			collectMarks(ms, []byte(tt.input), &mc, newCompatConfig(FlagHighlight), FlagHighlight)
 
 			highlights := findMarksByCh(ms, '=')
 			if len(highlights) != tt.wantMarks {
@@ -233,7 +233,7 @@ func TestCollectMarksAtSignLineBoundary(t *testing.T) {
 	ms.reset()
 	mc := fullMarkChars()
 	mc['@'] = true
-	collectMarks(ms, []byte(input), &mc, FlagPermissiveEmailAutolinks)
+	collectMarks(ms, []byte(input), &mc, newCompatConfig(FlagPermissiveEmailAutolinks), FlagPermissiveEmailAutolinks)
 
 	atMarks := findMarksByCh(ms, '@')
 	if len(atMarks) != 1 {
@@ -274,7 +274,7 @@ func TestCollectMarksAtSignDoesNotCrossLineBoundary(t *testing.T) {
 	ms.reset()
 	mc := fullMarkChars()
 	mc['@'] = true
-	collectMarks(ms, []byte(input), &mc, FlagPermissiveEmailAutolinks)
+	collectMarks(ms, []byte(input), &mc, newCompatConfig(FlagPermissiveEmailAutolinks), FlagPermissiveEmailAutolinks)
 
 	atMarks := findMarksByCh(ms, '@')
 	if len(atMarks) != 0 {
@@ -295,7 +295,7 @@ func TestFindLineBoundsCacheConsistency(t *testing.T) {
 	mc['^'] = true
 	mc['$'] = true
 	mc['='] = true
-	collectMarks(ms, []byte(input), &mc, FlagSuperscripts|FlagLatexMathSpans|FlagHighlight)
+	collectMarks(ms, []byte(input), &mc, newCompatConfig(FlagSuperscripts|FlagLatexMathSpans|FlagHighlight), FlagSuperscripts|FlagLatexMathSpans|FlagHighlight)
 
 	// Verify that every mark (except dummy and sentinel) is within the
 	// line bounds returned by a fresh findLineBounds call. If the cache
@@ -345,7 +345,7 @@ func TestFindLineBoundsCacheMultiLineAutolink(t *testing.T) {
 	ms.reset()
 	mc := fullMarkChars()
 	mc[':'] = true
-	collectMarks(ms, []byte(input), &mc, FlagPermissiveURLAutolinks)
+	collectMarks(ms, []byte(input), &mc, newCompatConfig(FlagPermissiveURLAutolinks), FlagPermissiveURLAutolinks)
 
 	colonMarks := findMarksByCh(ms, ':')
 	if len(colonMarks) != 2 {

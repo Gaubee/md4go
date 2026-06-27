@@ -267,7 +267,7 @@ md4go.parseWithRenderer(md, {
 | 常量 | 值 | 说明 |
 |---|---|---|
 | `md4go.Flags.CommonMark` | `0` | 标准 CommonMark（无扩展） |
-| `md4go.Flags.GitHub` | `1` | GFM 扩展（表格/删除线/任务列表/脚注等） |
+| `md4go.Flags.GitHub` | `0x180F0C` | GFM 扩展（表格/删除线/任务列表/脚注等） |
 
 高阶用户可直接传入任意 bitmask 组合。
 
@@ -308,6 +308,22 @@ md4go.parseWithRenderer(md, {
 
 > 完整 API 参考见 [README.zh.md](../README.zh.md)。
 
+## 测试
+
+```bash
+# 一键运行 E2E 测试
+go test ./integration/ -run TestWASME2E -v
+
+# 直接运行 JS 测试（需先手动构建 WASM）
+GOOS=js GOARCH=wasm go build -o wasm/md4go.wasm ./wasm
+cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" wasm/
+node --test --test-reporter spec wasm/md4go_e2e.test.js
+```
+
+**测试覆盖**：parseToHTML、parseToText、parseToHTMLWithOptions、parseWithRenderer、createParser、createStreamParser、常量导出、边界用例，共 48 条用例。
+
+**前置条件**：Node.js 18+（Node.js 不可用时 `go test` 自动跳过）。
+
 ## 文件
 
 | 文件 | 说明 |
@@ -316,3 +332,4 @@ md4go.parseWithRenderer(md, {
 | `md4go.js` | ES module loader，封装 `initMd4go()` |
 | `md4go.wasm` | 编译产物（已 gitignore） |
 | `wasm_exec.js` | Go WASM 运行时（从 `$GOROOT/lib/wasm/` 复制） |
+| `md4go_e2e.test.js` | E2E 测试（Node.js `node:test`，零依赖） |

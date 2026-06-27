@@ -4,6 +4,7 @@ diffcheck/csrc/md4c-html
 diffcheck/data/testdata*
 diffcheck/diffcheck
 diffcheck/diffcheck_bin
+benchmark/data/testdata*
 DIFF_REPORT.md
 goldmark
 md4c

@@ -52,16 +52,6 @@ func TestSliceSource_NoTrailingNewline(t *testing.T) {
 	if ok {
 		t.Fatal("should be eof")
 	}
-	if ls.DocEndsWithNewline() {
-		t.Error("should not end with newline")
-	}
-}
-
-func TestSliceSource_TrailingNewline(t *testing.T) {
-	ls := NewSliceSource([]byte("hello\n"))
-	if !ls.DocEndsWithNewline() {
-		t.Error("should end with newline")
-	}
 }
 
 func TestSliceSource_CRLF(t *testing.T) {

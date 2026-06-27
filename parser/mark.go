@@ -115,6 +115,12 @@ type markStacks struct {
 	footnoteDefs      map[string]*FootnoteDef
 	nextFootnoteIndex uint // 1-based counter for sequential numbering
 
+	// labelNormBuf points to ctx.labelNormBuf — a per-parse reusable buffer
+	// for normalizeLinkLabel. Set in context.reset(). Used inside markStacks
+	// methods (resolveBracketFootnote, isLinkReference) to avoid per-link
+	// allocation of the normalization buffer.
+	labelNormBuf *[]byte
+
 	// I36: C-34 — HTML horizon tracking for raw HTML inline detection optimization.
 	// Mirrors md4c ctx.html_comment_horizon etc. (md4c.c:261-264).
 	// When a scan for a closer fails, the horizon records how far the scan
@@ -123,6 +129,21 @@ type markStacks struct {
 	htmlProcInstrHorizon int
 	htmlDeclHorizon      int
 	htmlCdataHorizon     int
+
+	// Code span closer cache: avoids O(n²) re-scans for backtick runs.
+	// Indexed by backtick run length; resized to match codespanMaxLen.
+	// Initialized lazily per block via codeSpanCloserInit.
+	lastCodeSpanClosers  []int
+	codeSpanCloserInit   bool // false = cache needs per-block init
+	codeSpanParagraphEnd bool // true = block fully scanned, no closer found
+
+	// linkAttrSlots is a fixed-size inline array for link href/title storage.
+	// 99%+ of leaf blocks have 0-1 links, and 4 slots cover virtually all cases.
+	// When the block has ≤4 links, storeLinkAttrs writes directly to a slot
+	// (no allocation). Only when >4 links per block does it fall back to
+	// linkAttrMap (which is allocated lazily and cleared per-block).
+	linkAttrSlots [4]linkAttrSlot
+	linkAttrCount int
 }
 
 // Stack index constants for emphasis stacks.
@@ -156,7 +177,10 @@ func (ms *markStacks) reset() {
 	ms.marks = ms.marks[:0]
 	ms.unresolvedLinkHead = -1
 	ms.unresolvedLinkTail = -1
+	ms.linkAttrCount = 0
 	ms.linkAttrMap = nil
+	ms.codeSpanCloserInit = false
+	ms.codeSpanParagraphEnd = false
 	// Note: refDefs and footnoteDefs are NOT reset per-block — they persist across blocks
 }
 
@@ -340,10 +364,15 @@ func buildMarkChars(flags Flags) [256]bool {
 //
 // markChars is the per-parser mark character map — extensions may have
 // added characters beyond the CommonMark default set.
-func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, flags Flags) {
+func collectMarks(ms *markStacks, blockText []byte, markChars *[256]bool, cc compatConfig, flags Flags) {
 	ms.reset()
 
-	cc := newCompatConfig(flags)
+	// Pre-allocate mark slice capacity to avoid repeated growth during
+	// append. One mark per ~8 bytes of text is a safe upper bound for
+	// typical documents (most chars are not mark chars).
+	if n := len(blockText) / 8; cap(ms.marks) < n {
+		ms.marks = make([]Mark, 0, n)
+	}
 
 	off := 0
 	size := len(blockText)
@@ -818,70 +847,68 @@ func collectEmphMark(ms *markStacks, text []byte, off int) int {
 
 // --- Code span mark collection ---
 
-// codespanMaxLen is the maximum backtick run length for code spans.
-// Prevents O(n²) pathological inputs.
-//
-// CommonMark 0.31 §6.1 imposes no maximum on backtick string length.
-// md4c's CODESPAN_MARK_MAXLEN=32 is a non-standard limitation that causes
-// 33+ backtick code spans to be unrecognized. md4go raises the limit to
-// 1024, which covers all practical inputs while still providing O(n²)
-// protection against pathological backtick-heavy inputs.
+// Maximum backtick run length for code spans. Guards against O(n²) pathological inputs.
 const codespanMaxLen = 1024
 
 // collectCodeSpanMark handles backtick marks for code spans.
-// Mirrors md4c md_collect_marks() case '`' — attempts immediate pairing
-// with the closest matching closer.
-//
-// NULL handling: md4go follows the CommonMark spec — code spans containing
-// NULL are recognized, and NULL is later replaced with U+FFFD in the text
-// stream. (md4c skips them due to its C string terminator limitation.)
+// Immediately pairs opener with the closest matching closer. Caches
+// intermediate backtick runs of other lengths to avoid O(n²) re-scans.
 func collectCodeSpanMark(ms *markStacks, text []byte, off int, cc compatConfig) int {
-	// Count opener backtick length (full actual length for scanning)
 	actualLen := 0
 	for off+actualLen < len(text) && text[off+actualLen] == '`' {
 		actualLen++
 	}
-	// Mark length is capped at cc.codespanMaxLen to prevent O(n²),
-	// but we must advance past the entire backtick sequence.
-	// Mirrors md4c: off = codespan_end (past all backticks), even if n_backticks is capped.
-	// Default: 1024 (CommonMark-compliant). When FlagStrictCodeSpanLimit is set: 32 (md4c-compatible).
 	maxLen := cc.codespanMaxLen
+	if maxLen == 0 {
+		maxLen = codespanMaxLen
+	}
 	openerLen := actualLen
 	if openerLen > maxLen {
 		openerLen = maxLen
 	}
 
-	actualEnd := off + actualLen // the real end of the backtick sequence
+	actualEnd := off + actualLen
 	openerIdx := ms.addMark(off, off+openerLen, '`', markPotentialOpener|markPotentialCloser)
 
-	// Search for matching closer (exactly openerLen backticks, matching md4c
-	// md_is_code_span() line 3059: closer_end - closer_beg == mark_len).
-	// A shorter opener must NOT match a longer closer (e.g., ` `` ` should
-	// produce <code>``</code>, not match the double backtick as closer).
-	closerOff := actualEnd
-	for closerOff < len(text) {
+	// Lazy-init the closer cache for this block (once).
+	if cap(ms.lastCodeSpanClosers) <= maxLen {
+		ms.lastCodeSpanClosers = make([]int, maxLen+1)
+	}
+	cache := ms.lastCodeSpanClosers[:maxLen+1]
+	if !ms.codeSpanCloserInit {
+		for i := range cache {
+			cache[i] = 0
+		}
+		ms.codeSpanCloserInit = true
+	}
+
+	// If paragraph was fully scanned and the cached closer is before us, skip.
+	if ms.codeSpanParagraphEnd && openerLen < len(cache) && cache[openerLen] > 0 && cache[openerLen] < actualEnd {
+		return actualEnd
+	}
+
+	for closerOff := actualEnd; closerOff < len(text); {
 		if text[closerOff] != '`' {
 			closerOff++
 			continue
 		}
-		// Count closer length
 		closerLen := 0
 		for closerOff+closerLen < len(text) && text[closerOff+closerLen] == '`' {
 			closerLen++
 		}
 		if closerLen == openerLen {
-			// Found matching closer — resolve immediately
 			closerEnd := closerOff + closerLen
 			closerIdx := ms.addMark(closerOff, closerEnd, '`', markPotentialCloser)
 			ms.resolveRange(openerIdx, closerIdx)
 			return closerEnd
 		}
-		// Different backtick length — skip past them
+		if closerLen > 0 && closerLen < len(cache) && closerOff > cache[closerLen] {
+			cache[closerLen] = closerOff
+		}
 		closerOff += closerLen
 	}
 
-	// No matching closer found — opener remains unresolved.
-	// Return actualEnd (past all backticks) to avoid re-scanning the excess.
+	ms.codeSpanParagraphEnd = true
 	return actualEnd
 }
 

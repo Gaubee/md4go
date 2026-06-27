@@ -70,3 +70,18 @@ func (p *Parser) Parse(src []byte, r renderer.Renderer) error {
 func (p *Parser) ParseStream(src stream.LineSource, r renderer.Renderer) error {
 	return p.p.ParseStream(src, r)
 }
+
+// ParseBlocksOnly parses src and emits only block-level events, skipping the
+// entire inline analysis pipeline. This is significantly faster for use cases
+// that only need document structure (headings, block types, validation).
+// See parser.Parser.ParseBlocksOnly for details.
+func (p *Parser) ParseBlocksOnly(src []byte, r renderer.Renderer) error {
+	return p.p.ParseBlocksOnly(src, r)
+}
+
+// ParseBlocksOnlyStream parses from a LineSource and emits only block-level events.
+// Stream variant of ParseBlocksOnly — useful for large documents where you only
+// need structural information. No Span events are emitted.
+func (p *Parser) ParseBlocksOnlyStream(src stream.LineSource, r renderer.Renderer) error {
+	return p.p.ParseBlocksOnlyStream(src, r)
+}

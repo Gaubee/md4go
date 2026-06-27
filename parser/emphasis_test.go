@@ -77,7 +77,7 @@ func TestAnalyzeEmphSimpleEm(t *testing.T) {
 	// *foo* → <em>foo</em>
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("*foo*"), &markCharMap, 0)
+	collectMarks(ms, []byte("*foo*"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("*foo*"), "*_")
 
 	// First * should be resolved as opener, second as closer
@@ -102,7 +102,7 @@ func TestAnalyzeEmphStrong(t *testing.T) {
 	// **foo** → <strong>foo</strong>
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("**foo**"), &markCharMap, 0)
+	collectMarks(ms, []byte("**foo**"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("**foo**"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
@@ -123,7 +123,7 @@ func TestAnalyzeEmphStrongEm(t *testing.T) {
 	// ***foo*** → <em><strong>foo</strong></em>
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("***foo***"), &markCharMap, 0)
+	collectMarks(ms, []byte("***foo***"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("***foo***"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
@@ -147,7 +147,7 @@ func TestAnalyzeEmphSplit(t *testing.T) {
 	// Expected: <strong>*foo</strong> (md4c behavior: rightmost 2 chars match)
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("***foo**"), &markCharMap, 0)
+	collectMarks(ms, []byte("***foo**"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("***foo**"), "*_")
 
 	// The closer ** should be resolved
@@ -164,7 +164,7 @@ func TestAnalyzeEmphUnderscore(t *testing.T) {
 	// _foo_ → <em>foo</em>
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("_foo_"), &markCharMap, 0)
+	collectMarks(ms, []byte("_foo_"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("_foo_"), "*_")
 
 	opener := findMarkByCh(ms, '_', 0)
@@ -185,7 +185,7 @@ func TestAnalyzeEmphIntraWordUnderscore(t *testing.T) {
 	// foo_bar → not emphasis (intra-word underscore)
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("foo_bar"), &markCharMap, 0)
+	collectMarks(ms, []byte("foo_bar"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("foo_bar"), "*_")
 
 	// No marks should be resolved as emphasis
@@ -202,7 +202,7 @@ func TestAnalyzeEmphRuleOf3(t *testing.T) {
 	// This is the basic Rule-of-3 case.
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("***bar***"), &markCharMap, 0)
+	collectMarks(ms, []byte("***bar***"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("***bar***"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
@@ -219,7 +219,7 @@ func TestAnalyzeEmphUnresolved(t *testing.T) {
 	// *foo → no closer, opener stays unresolved
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("*foo"), &markCharMap, 0)
+	collectMarks(ms, []byte("*foo"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("*foo"), "*_")
 
 	opener := findMarkByCh(ms, '*', 0)
@@ -238,7 +238,7 @@ func TestAnalyzeTildeStrikethrough(t *testing.T) {
 	ms := &markStacks{}
 	ms.reset()
 	mc := buildMarkChars(FlagStrikethrough)
-	collectMarks(ms, []byte("~~strike~~"), &mc, FlagStrikethrough)
+	collectMarks(ms, []byte("~~strike~~"), &mc, newCompatConfig(FlagStrikethrough), FlagStrikethrough)
 	analyzeMarksWithFilter(ms, []byte("~~strike~~"), "~")
 
 	opener := findMarkByCh(ms, '~', 0)
@@ -257,7 +257,7 @@ func TestAnalyzeEntity(t *testing.T) {
 	// &amp; → entity
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("&amp;"), &markCharMap, 0)
+	collectMarks(ms, []byte("&amp;"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("&amp;"), "&")
 
 	ampMark := findMarkByCh(ms, '&', 0)
@@ -273,7 +273,7 @@ func TestAnalyzeEntityInvalid(t *testing.T) {
 	// &invalid (no semicolon) → not resolved as entity
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("&invalid"), &markCharMap, 0)
+	collectMarks(ms, []byte("&invalid"), &markCharMap, compatConfig{}, 0)
 	analyzeMarksWithFilter(ms, []byte("&invalid"), "&")
 
 	ampMark := findMarkByCh(ms, '&', 0)
@@ -317,7 +317,7 @@ func TestAnalyzeMarksMixedEmphasis(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ms := &markStacks{}
 			ms.reset()
-			collectMarks(ms, []byte(tt.input), &markCharMap, 0)
+			collectMarks(ms, []byte(tt.input), &markCharMap, compatConfig{}, 0)
 			analyzeMarksWithFilter(ms, []byte(tt.input), "*_")
 
 			resolvedPairs := 0
@@ -373,7 +373,7 @@ func TestUnicodeFlankWhitespace(t *testing.T) {
 	// The * should NOT be left/right flanking → no emphasis
 	ms := &markStacks{}
 	ms.reset()
-	collectMarks(ms, []byte("*\u00a0a\u00a0*"), &markCharMap, 0)
+	collectMarks(ms, []byte("*\u00a0a\u00a0*"), &markCharMap, compatConfig{}, 0)
 
 	// Find the * marks
 	var starMarks []int
@@ -409,7 +409,7 @@ func TestUnicodeFlankPunctuation(t *testing.T) {
 	for _, input := range inputs {
 		ms := &markStacks{}
 		ms.reset()
-		collectMarks(ms, []byte(input), &markCharMap, 0)
+		collectMarks(ms, []byte(input), &markCharMap, compatConfig{}, 0)
 		analyzeMarksWithFilter(ms, []byte(input), "*")
 
 		// No * should be resolved as both opener and closer

@@ -203,7 +203,7 @@ func (p *Parser) isLinkReferenceDefinition(ctx *context, b *Block, startLine int
 	if len(label) == 0 {
 		return 0
 	}
-	normalized := normalizeLinkLabel(label)
+	normalized := normalizeLinkLabel(label, &ctx.labelNormBuf)
 	if len(normalized) == 0 {
 		return 0
 	}
@@ -288,7 +288,7 @@ func parseRefdefLabel(lines []Line, startLine int) (labelBeg, labelEnd, nLines i
 		// ASCII punctuation AND newlines (ISPUNCT(off+1) || ISNEWLINE(off+1)).
 		// All characters — including escape sequences — count as 1 toward
 		// the 999 limit (md4c.c:2230: len++ is unconditional per iteration).
-		if c == '\\' && off+1 < len(line) && (isASCIIPunctRefdef(line[off+1]) || line[off+1] == '\n') {
+		if c == '\\' && off+1 < len(line) && (isASCIIPunct(line[off+1]) || line[off+1] == '\n') {
 			off += 2
 		} else {
 			off++
@@ -318,7 +318,7 @@ func parseRefdefDestination(line []byte, off int) (int, int, int, bool) {
 		destBeg := off
 		for off < len(line) {
 			c := line[off]
-			if c == '\\' && off+1 < len(line) && isASCIIPunctRefdef(line[off+1]) {
+			if c == '\\' && off+1 < len(line) && isASCIIPunct(line[off+1]) {
 				off += 2
 				continue
 			}
@@ -341,7 +341,7 @@ func parseRefdefDestination(line []byte, off int) (int, int, int, bool) {
 	parenDepth := 0
 	for off < len(line) {
 		c := line[off]
-		if c == '\\' && off+1 < len(line) && isASCIIPunctRefdef(line[off+1]) {
+		if c == '\\' && off+1 < len(line) && isASCIIPunct(line[off+1]) {
 			off += 2
 			continue
 		}
@@ -451,7 +451,7 @@ func parseRefdefTitle(lines []Line, lineIdx int, off int) ([]byte, int, bool) {
 			continue
 		}
 		c := line[off]
-		if c == '\\' && off+1 < len(line) && isASCIIPunctRefdef(line[off+1]) {
+		if c == '\\' && off+1 < len(line) && isASCIIPunct(line[off+1]) {
 			off += 2
 			continue
 		}
@@ -553,12 +553,6 @@ func extractRefdefTitleText(lines []Line, startLine, beg, end, nLines int) []byt
 	return buf
 }
 
-// isASCIIPunctRefdef returns true for ASCII punctuation characters.
-func isASCIIPunctRefdef(c byte) bool {
-	return (c >= 0x21 && c <= 0x2F) || (c >= 0x3A && c <= 0x40) ||
-		(c >= 0x5B && c <= 0x60) || (c >= 0x7B && c <= 0x7E)
-}
-
 // isFootnoteDefinition parses lines starting at startLine as a footnote definition.
 // Returns the number of lines consumed (0 if not a footnote definition).
 // Mirrors md4c md_is_footnote_definition() (md4c.c:2027-2125).
@@ -647,7 +641,7 @@ func (p *Parser) isFootnoteDefinition(ctx *context, b *Block, startLine int) int
 
 	// Extract and normalize label
 	label := line[labelBeg:labelEnd]
-	normalized := normalizeLinkLabel(label)
+	normalized := normalizeLinkLabel(label, &ctx.labelNormBuf)
 	if len(normalized) == 0 {
 		return 0
 	}

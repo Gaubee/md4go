@@ -21,13 +21,16 @@ func newCompatConfig(flags Flags) compatConfig {
 		// Code span backtick delimiter limit: 1024 by default (CommonMark-compliant,
 		// no limit per spec). When FlagStrictCodeSpanLimit is set, restrict to 32
 		// to match md4c's CODESPAN_MARK_MAXLEN (non-standard C limitation).
-		codespanMaxLen: func() int {
-			if flags&FlagStrictCodeSpanLimit != 0 {
-				return 32 // md4c-compatible limit
-			}
-			return 1024 // CommonMark-compliant (no limit per spec)
-		}(),
+		codespanMaxLen: codespanMaxLenFromFlags(flags),
 	}
+}
+
+// codespanMaxLenFromFlags returns the maximum backtick delimiter length for code spans.
+func codespanMaxLenFromFlags(flags Flags) int {
+	if flags&FlagStrictCodeSpanLimit != 0 {
+		return 32 // md4c-compatible limit
+	}
+	return 1024 // CommonMark-compliant (no limit per spec)
 }
 
 // protectDoublePipeInCells protects || from being split as table cell boundary.
@@ -66,6 +69,6 @@ func validateTableColumns(headerLine []byte, underlineCols int, cc compatConfig)
 	if !cc.strictTableCols {
 		return true
 	}
-	headerCols := len(splitTableCells(headerLine, cc))
+	headerCols := len(splitTableCells(headerLine, cc, nil))
 	return headerCols <= underlineCols
 }

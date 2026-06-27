@@ -367,9 +367,3 @@ func (p *Parser) enterContainer(ctx *context, c *Container, r renderer.Renderer)
 	ctx.containers = append(ctx.containers, *c)
 	return nil
 }
-
-// closeAllContainers emits LeaveBlock for all open containers.
-// Closes innermost first. Mirrors md4c md_leave_child_containers(ctx, 0).
-func (p *Parser) closeAllContainers(ctx *context, r renderer.Renderer) {
-	p.leaveContainers(ctx, 0, r)
-}

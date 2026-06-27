@@ -128,19 +128,30 @@ func analyzeTableAlignment(line []byte, nAlign int) []ast.Align {
 // The cc parameter controls || protection behavior:
 //   - cc.protectDoublePipe=false (default): || is split per GFM standard
 //   - cc.protectDoublePipe=true: || is protected (md4go improvement)
-func splitTableCells(line []byte, cc compatConfig) [][]byte {
+func splitTableCells(line []byte, cc compatConfig, reuseBuf *[]bool) [][]byte {
 	line = bytes.TrimSpace(line)
 
-	// Build a set of byte positions that are "protected" from pipe splitting:
-	// inside code spans and optionally wikilinks.
-	protected := make([]bool, len(line))
+	// Reuse or allocate the protected positions buffer.
+	n := len(line)
+	var protected []bool
+	if reuseBuf != nil {
+		buf := *reuseBuf
+		if cap(buf) < n {
+			buf = make([]bool, n*2)
+			*reuseBuf = buf
+		}
+		protected = buf[:n]
+		for i := range protected {
+			protected[i] = false
+		}
+	} else {
+		protected = make([]bool, n)
+	}
 
 	// 1. Mark positions inside backtick code spans.
 	skipCodeSpans(line, protected)
 
 	// 2. Mark positions inside wikilinks [[...]] — only when FlagWikilinks is set.
-	//    Per GFM standard, [[...]] without wikilink support is just text, and | inside
-	//    it should be treated as a cell separator (aligns with md4c).
 	if cc.wikilinkProtect {
 		skipWikilinks(line, protected)
 	}
@@ -151,11 +162,11 @@ func splitTableCells(line []byte, cc compatConfig) [][]byte {
 	var cells [][]byte
 	cellStart := 0
 
-	for i := 0; i < len(line); i++ {
+	for i := 0; i < n; i++ {
 		if protected[i] {
 			continue
 		}
-		if line[i] == '\\' && i+1 < len(line) {
+		if line[i] == '\\' && i+1 < n {
 			i++ // skip escaped char
 			continue
 		}
@@ -167,12 +178,12 @@ func splitTableCells(line []byte, cc compatConfig) [][]byte {
 	cells = append(cells, bytes.TrimSpace(line[cellStart:]))
 
 	// If first cell is empty and line starts with |, it's a leading pipe
-	if len(cells) > 1 && len(cells[0]) == 0 && len(line) > 0 && line[0] == '|' {
+	if len(cells) > 1 && len(cells[0]) == 0 && n > 0 && line[0] == '|' {
 		cells = cells[1:]
 	}
 
 	// If last cell is empty and line ends with |, it's a trailing pipe
-	if len(cells) > 1 && len(cells[len(cells)-1]) == 0 && len(line) > 0 && line[len(line)-1] == '|' {
+	if len(cells) > 1 && len(cells[len(cells)-1]) == 0 && n > 0 && line[n-1] == '|' {
 		cells = cells[:len(cells)-1]
 	}
 
@@ -308,7 +319,7 @@ func (p *Parser) emitTable(ctx *context, b *Block, r renderer.Renderer) {
 // emitTableRow emits a single table row (TR with cells).
 // Mirrors md4c md_process_table_row() (md4c.c:5171-5224).
 func (p *Parser) emitTableRow(ctx *context, line []byte, colCount int, aligns []ast.Align, cellType ast.BlockType, r renderer.Renderer) {
-	cells := splitTableCells(line, p.compat)
+	cells := splitTableCells(line, p.compat, &p.tableProtectedBuf)
 
 	_ = r.EnterBlock(ast.BlockTR, nil)
 

@@ -200,7 +200,7 @@ func isValidNamedEntityContents(text []byte, beg, maxEnd int, off *int) bool {
 	o := beg
 	for o < maxEnd {
 		c := text[o]
-		if isAlnumByte(c) {
+		if isAlnum(c) {
 			if n == 0 && !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
 				return false
 			}
@@ -215,9 +215,4 @@ func isValidNamedEntityContents(text []byte, beg, maxEnd int, off *int) bool {
 	}
 	*off = o
 	return n >= 2
-}
-
-// isAlnumByte returns true for ASCII alphanumeric characters.
-func isAlnumByte(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }

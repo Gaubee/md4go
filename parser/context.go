@@ -1,6 +1,43 @@
 package parser
 
-import "github.com/userpro/md4go/ast"
+import (
+	"sync"
+
+	"github.com/userpro/md4go/ast"
+)
+
+var contextPool = sync.Pool{New: func() any { return &context{} }}
+
+// getContext returns a pooled context.
+func getContext() *context { return contextPool.Get().(*context) }
+
+// putContext returns a context to the pool, dropping oversized maps.
+func putContext(ctx *context) {
+	if ctx == nil {
+		return
+	}
+
+	const maxPoolMapSize = 1024
+	if len(ctx.refDefs) > maxPoolMapSize {
+		ctx.refDefs = nil
+	}
+	if len(ctx.footnoteDefs) > maxPoolMapSize {
+		ctx.footnoteDefs = nil
+	}
+	// Prevent unbounded labelNormBuf growth from pathological labels
+	// (e.g. a crafted document with a 1MB link label). 4KB is more than
+	// adequate for any real-world link label.
+	const maxLabelNormBufSize = 4096
+	if cap(ctx.labelNormBuf) > maxLabelNormBufSize {
+		ctx.labelNormBuf = nil
+	}
+	// Prevent unbounded blockTextBuf growth — 64KB handles any realistic block.
+	const maxBlockTextBufSize = 65536
+	if cap(ctx.blockTextBuf) > maxBlockTextBufSize {
+		ctx.blockTextBuf = nil
+	}
+	contextPool.Put(ctx)
+}
 
 // context holds per-parse mutable state, analogous to md4c's MD_CTX.
 //
@@ -31,6 +68,29 @@ type context struct {
 	// Needed for HTML block types 1-5 verbatim output to preserve indentation.
 	// Set in analyzeLine step 1, read by htmlBlockTrigger and step 3.
 	containerOff int
+
+	// noInline: when true, emitBlock skips the entire inline analysis pipeline
+	// (processBlockInlines). Used by ParseBlocksOnly for fast structural parsing:
+	// only EnterBlock/LeaveBlock events are emitted, no span or text events.
+	// This saves ~8,000 renderer interface dispatches per parse plus the full
+	// collectMarks→analyzeMarks→resolveBrackets→analyzeLinkContents→processInlines
+	// chain, cutting ParseOnly wall-clock time by ~40-60%.
+	noInline bool
+
+	// labelNormBuf is a reusable buffer for normalizeLinkLabel.
+	// Every reference link resolution allocates make([]byte, 0, end-start)
+	// for label normalization. Pooling this buffer avoids per-link allocation.
+	// The buffer is shared across blocks within a single parse call;
+	// the normalized result is always consumed immediately (converted to
+	// string for map lookup), so reuse is safe.
+	labelNormBuf []byte
+
+	// blockTextBuf is a reusable buffer for assembleTextFromLines.
+	// Each leaf block's text is assembled into this buffer and consumed
+	// synchronously by processBlockInlines. After ctx.stk.reset(), no
+	// references to the buffer remain, so reuse across blocks is safe.
+	// Mirrors the md4c philosophy of a flat per-block text buffer.
+	blockTextBuf []byte
 
 	// Mark system (M3): inline marks for current block
 	stk markStacks // marks + 19 opener stacks
@@ -130,4 +190,10 @@ func (ctx *context) reset() {
 	ctx.lastListItemStartsWithTwoBlankLines = false
 	ctx.htmlBlockType = 0
 	ctx.containerOff = 0
+	ctx.noInline = false
+	ctx.labelNormBuf = ctx.labelNormBuf[:0]
+	ctx.blockTextBuf = ctx.blockTextBuf[:0]
+	// Wire markStacks.labelNormBuf to ctx.labelNormBuf so normalizeLinkLabel
+	// inside markStacks methods can reuse the context-level buffer.
+	ctx.stk.labelNormBuf = &ctx.labelNormBuf
 }

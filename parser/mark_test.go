@@ -160,7 +160,7 @@ func TestPopOpeners(t *testing.T) {
 
 func TestCollectMarksBackslashEscape(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte(`foo\*bar`), &markCharMap, 0)
+	collectMarks(ms, []byte(`foo\*bar`), &markCharMap, compatConfig{}, 0)
 	// Should have: resolved '\' mark + sentinel
 	found := false
 	for _, m := range ms.marks {
@@ -212,7 +212,7 @@ func TestCollectMarksEmphAsterisk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ms := &markStacks{}
-			collectMarks(ms, []byte(tt.input), &markCharMap, 0)
+			collectMarks(ms, []byte(tt.input), &markCharMap, compatConfig{}, 0)
 			ooCount := 0
 			ocCount := 0
 			for _, m := range ms.marks {
@@ -237,7 +237,7 @@ func TestCollectMarksEmphAsterisk(t *testing.T) {
 
 func TestCollectMarksCodeSpan(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("foo `code` bar"), &markCharMap, 0)
+	collectMarks(ms, []byte("foo `code` bar"), &markCharMap, compatConfig{}, 0)
 
 	// Should have resolved code span
 	found := false
@@ -262,7 +262,7 @@ func TestCollectMarksCodeSpan(t *testing.T) {
 
 func TestCollectMarksCodeSpanDoubleBacktick(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("``code``"), &markCharMap, 0)
+	collectMarks(ms, []byte("``code``"), &markCharMap, compatConfig{}, 0)
 
 	// Double backtick code span should resolve
 	found := false
@@ -281,7 +281,7 @@ func TestCollectMarksCodeSpanDoubleBacktick(t *testing.T) {
 
 func TestCollectMarksUnmatchedBacktick(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("foo `bar"), &markCharMap, 0)
+	collectMarks(ms, []byte("foo `bar"), &markCharMap, compatConfig{}, 0)
 
 	// Unmatched backtick should NOT be resolved
 	for _, m := range ms.marks {
@@ -293,7 +293,7 @@ func TestCollectMarksUnmatchedBacktick(t *testing.T) {
 
 func TestCollectMarksBrackets(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("[text](url)"), &markCharMap, 0)
+	collectMarks(ms, []byte("[text](url)"), &markCharMap, compatConfig{}, 0)
 
 	// Should have '[' opener and ']' closer
 	var foundOpen, foundClose bool
@@ -315,7 +315,7 @@ func TestCollectMarksBrackets(t *testing.T) {
 
 func TestCollectMarksImageBracket(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("![alt](url)"), &markCharMap, 0)
+	collectMarks(ms, []byte("![alt](url)"), &markCharMap, compatConfig{}, 0)
 
 	// '[' after '!' should have CANBEIMAGE flag
 	found := false
@@ -331,7 +331,7 @@ func TestCollectMarksImageBracket(t *testing.T) {
 
 func TestCollectMarksEntity(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("foo &amp; bar"), &markCharMap, 0)
+	collectMarks(ms, []byte("foo &amp; bar"), &markCharMap, compatConfig{}, 0)
 
 	var foundAmp, foundSemi bool
 	for _, m := range ms.marks {
@@ -353,7 +353,7 @@ func TestCollectMarksEntity(t *testing.T) {
 func TestCollectMarksTilde(t *testing.T) {
 	ms := &markStacks{}
 	mc := buildMarkChars(FlagStrikethrough)
-	collectMarks(ms, []byte("~~strike~~"), &mc, FlagStrikethrough)
+	collectMarks(ms, []byte("~~strike~~"), &mc, newCompatConfig(FlagStrikethrough), FlagStrikethrough)
 
 	// Double tilde should create a mark with length 2
 	found := false
@@ -369,7 +369,7 @@ func TestCollectMarksTilde(t *testing.T) {
 
 func TestCollectMarksSentinel(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("hello"), &markCharMap, 0)
+	collectMarks(ms, []byte("hello"), &markCharMap, compatConfig{}, 0)
 
 	last := ms.marks[len(ms.marks)-1]
 	if last.Ch != 127 {
@@ -385,7 +385,7 @@ func TestCollectMarksSentinel(t *testing.T) {
 
 func TestCollectMarksNoMarks(t *testing.T) {
 	ms := &markStacks{}
-	collectMarks(ms, []byte("hello world"), &markCharMap, 0)
+	collectMarks(ms, []byte("hello world"), &markCharMap, compatConfig{}, 0)
 
 	// Should only have the sentinel
 	if len(ms.marks) != 1 {
@@ -439,7 +439,7 @@ func TestCodeSpanMaxLen(t *testing.T) {
 		longRun[i] = '`'
 	}
 	ms := &markStacks{}
-	collectMarks(ms, longRun, &markCharMap, 0)
+	collectMarks(ms, longRun, &markCharMap, compatConfig{}, 0)
 	// Mark length should be capped at codespanMaxLen
 	for _, m := range ms.marks {
 		if m.Ch == '`' && m.End-m.Beg > codespanMaxLen {

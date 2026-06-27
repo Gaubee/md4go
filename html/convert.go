@@ -9,6 +9,7 @@ import (
 
 	"github.com/userpro/md4go/parser"
 	"github.com/userpro/md4go/renderer"
+	"github.com/userpro/md4go/stream"
 )
 
 // Option configures the HTML conversion.
@@ -57,6 +58,27 @@ func Convert(src []byte, w io.Writer, opts ...Option) error {
 	p := parser.New(cfg.flags, cfg.extenders...)
 	h := NewWithFlags(w, cfg.rFlags)
 	if err := p.Parse(src, h); err != nil {
+		return err
+	}
+	return h.Flush()
+}
+
+// ConvertStream parses from r (io.Reader) and writes HTML to w.
+// Uses ReaderSource — incremental, low memory. Refdef is first-seen-first.
+// XHTML-style self-closing tags by default for CommonMark spec compliance.
+func ConvertStream(r io.Reader, w io.Writer, opts ...Option) error {
+	cfg := &config{}
+	for _, o := range opts {
+		o(cfg)
+	}
+	// Map parser-level flag to renderer flag
+	if cfg.flags&parser.FlagNoXHTMLEntityEncoding != 0 {
+		cfg.rFlags |= FlagNoXHTMLEscaping
+	}
+	p := parser.New(cfg.flags, cfg.extenders...)
+	rs := stream.NewReaderSource(r)
+	h := NewWithFlags(w, cfg.rFlags)
+	if err := p.ParseStream(rs, h); err != nil {
 		return err
 	}
 	return h.Flush()

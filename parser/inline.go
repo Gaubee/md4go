@@ -17,7 +17,7 @@ import (
 // inline pipeline (md4c §5.4). The order is critical and must not be changed.
 func (p *Parser) processBlockInlines(ctx *context, blockText []byte, r renderer.Renderer) {
 	// Phase 1: collect marks
-	collectMarks(&ctx.stk, blockText, &p.markChars, p.flags)
+	collectMarks(&ctx.stk, blockText, &p.markChars, p.compat, p.flags)
 
 	// Phase 2: Bracket spans — links, images, footnotes
 	// Mirrors md4c md_analyze_marks("[]!") + md_resolve_brackets()
@@ -269,7 +269,7 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 					closerIdx := opener.Next
 					if closerIdx >= 0 && closerIdx < len(marks) {
 						closer := &marks[closerIdx]
-						attrs, ok := ctx.stk.linkAttrMap[i]
+						attrs, ok := ctx.stk.getLinkAttrsFull(i)
 						if ok {
 							// Build label attribute from the text between opener.End and closer.Beg
 							label := blockText[opener.End:closer.Beg]
@@ -496,32 +496,37 @@ func (p *Parser) processInlines(ctx *context, blockText []byte, r renderer.Rende
 	}
 }
 
-// assembleTextFromLines joins lines with '\n', producing a single byte slice.
-// The returned slice is a new allocation (not a view into input)
-// because block lines may come from different parts of the input.
-func assembleTextFromLines(lines []Line) []byte {
+// assembleTextFromLines joins lines with '\n', writing into the reusable buffer
+// pointed to by buf. The caller must ensure buf is not read after the next call
+// to assembleTextFromLines with the same buf pointer.
+// The returned slice is a view into *buf.
+func assembleTextFromLines(lines []Line, buf *[]byte) []byte {
 	if len(lines) == 0 {
 		return nil
 	}
+	// Calculate required capacity
 	size := 0
 	for _, ln := range lines {
 		size += len(ln.Text)
 	}
 	size += len(lines) - 1 // newlines between lines
 
-	result := make([]byte, 0, size)
+	*buf = (*buf)[:0]
+	if cap(*buf) < size {
+		*buf = make([]byte, 0, size)
+	}
 	for i, ln := range lines {
 		if i > 0 {
-			result = append(result, '\n')
+			*buf = append(*buf, '\n')
 		}
-		result = append(result, ln.Text...)
+		*buf = append(*buf, ln.Text...)
 	}
-	return result
+	return *buf
 }
 
-// assembleBlockText joins the lines of a leaf block with '\n'.
-// The returned slice is a new allocation (not a view into ctx.src)
-// because block lines may come from different parts of the input.
+// assembleBlockText joins the lines of a leaf block with '\n' into
+// ctx.blockTextBuf. The returned slice is a view into ctx.blockTextBuf
+// and is valid only until the next call to assembleBlockText.
 //
 // IMPORTANT: Trailing spaces are preserved in the line text so that
 // hard line break detection (two+ trailing spaces + newline) works.
@@ -531,7 +536,7 @@ func (p *Parser) assembleBlockText(ctx *context, b *Block) []byte {
 	if b.NLines == 0 {
 		return nil
 	}
-	return assembleTextFromLines(ctx.blk.lines[b.LineIdx : b.LineIdx+b.NLines])
+	return assembleTextFromLines(ctx.blk.lines[b.LineIdx:b.LineIdx+b.NLines], &ctx.blockTextBuf)
 }
 
 // emitTextWithBreaks emits text segments, splitting at '\n' boundaries.

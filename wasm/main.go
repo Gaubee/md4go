@@ -72,6 +72,9 @@ func parseToHTMLWithOptions(this js.Value, args []js.Value) any {
 
 func parseWithRenderer(this js.Value, args []js.Value) any {
 	md, flags, cbs := extractRendererArgs(args)
+	if cbs.IsNull() || cbs.IsUndefined() {
+		return map[string]any{"error": "parseWithRenderer requires a callbacks object"}
+	}
 	r := newJSRenderer(cbs)
 	p := parser.New(flags)
 	if err := p.Parse([]byte(md), r); err != nil {
@@ -124,6 +127,9 @@ func createParser(this js.Value, args []js.Value) any {
 	}))
 	obj.Set("parseWithRenderer", js.FuncOf(func(this js.Value, args []js.Value) any {
 		md, _, cbs := extractRendererArgs(args)
+		if cbs.IsNull() || cbs.IsUndefined() {
+			return map[string]any{"error": "parseWithRenderer requires a callbacks object"}
+		}
 		r := newJSRenderer(cbs)
 		if err := p.Parse([]byte(md), r); err != nil {
 			return map[string]any{"error": err.Error()}
@@ -142,8 +148,11 @@ func createParser(this js.Value, args []js.Value) any {
 // ─── Stream accumulator ──────────────────────────────────────────────
 
 // createStreamParser returns a chunk-accumulating stream object for
-// large documents. Call write() repeatedly, then finishHTML() or
-// finishText() to parse the complete document.
+// large documents. Call write() repeatedly, then call one of:
+//   - finishHTML(rendererFlags?) → string
+//   - finishText() → string
+//   - finishWithRenderer(callbacksObj) → null | {error}
+// to parse the complete document with the chosen output format.
 //
 // Streaming in WASM is single-threaded; chunks are accumulated and
 // parsed as a whole on finish(). The benefit is the feeding pattern
@@ -187,6 +196,17 @@ func createStreamParser(this js.Value, args []js.Value) any {
 		_ = t.Flush()
 		buf.Reset()
 		return out.String()
+	}))
+	obj.Set("finishWithRenderer", js.FuncOf(func(this js.Value, args []js.Value) any {
+		if len(args) == 0 || args[0].Type() != js.TypeObject {
+			return map[string]any{"error": "finishWithRenderer requires a callbacks object"}
+		}
+		r := newJSRenderer(args[0])
+		if err := p.Parse(buf.Bytes(), r); err != nil {
+			return map[string]any{"error": err.Error()}
+		}
+		buf.Reset()
+		return nil
 	}))
 	obj.Set("dispose", js.FuncOf(func(this js.Value, args []js.Value) any {
 		return nil

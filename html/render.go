@@ -2,14 +2,24 @@ package html
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/userpro/md4go/ast"
 	"github.com/userpro/md4go/renderer"
 )
+
+// headingOpenTags maps heading level 1-6 to opening HTML tags.
+// Precomputed to avoid fmt.Sprintf allocation on the hot path.
+var headingOpenTags = [7]string{"", "<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"}
+
+// headingCloseTags maps heading level 1-6 to closing HTML tags.
+var headingCloseTags = [7]string{"", "</h1>\n", "</h2>\n", "</h3>\n", "</h4>\n", "</h5>\n", "</h6>\n"}
+
+// listBufPool pools *bytes.Buffer for list content buffering (tight/loose detection).
+var listBufPool = sync.Pool{New: func() any { return &bytes.Buffer{} }}
 
 // HTML is the HTML renderer — used for spec compliance validation.
 // It mirrors md4c-html.c's output tag mapping.
@@ -69,7 +79,9 @@ func (h *HTML) emitByte(c byte) {
 
 // pushListBuffer starts buffering list content.
 func (h *HTML) pushListBuffer() {
-	h.listBufs = append(h.listBufs, &bytes.Buffer{})
+	buf := listBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	h.listBufs = append(h.listBufs, buf)
 }
 
 // popListBuffer removes the top buffer, strips <p> tags if tight,
@@ -88,6 +100,7 @@ func (h *HTML) popListBuffer(isTight bool) {
 	} else {
 		_ = h.w.WriteString(content)
 	}
+	listBufPool.Put(buf)
 }
 
 // stripPTagsInLI removes <p> and </p> tags that are direct children of <li> tags,
@@ -541,6 +554,99 @@ func (h *HTML) Text(t ast.TextType, text []byte) error {
 
 // --- Entity Translation (mirrors md4c-html.c render_entity + render_utf8_codepoint) ---
 
+// compareBytesToString compares a []byte to a string lexicographically.
+// Returns -1 if b < s, 0 if b == s, 1 if b > s. Zero allocation.
+func compareBytesToString(b []byte, s string) int {
+	n := len(b)
+	if len(s) < n {
+		n = len(s)
+	}
+	for i := 0; i < n; i++ {
+		if b[i] < s[i] {
+			return -1
+		}
+		if b[i] > s[i] {
+			return 1
+		}
+	}
+	if len(b) < len(s) {
+		return -1
+	}
+	if len(b) > len(s) {
+		return 1
+	}
+	return 0
+}
+
+// entityLookupBytes performs a binary search for a named entity using a
+// []byte key, avoiding the []byte→string allocation of entityLookup.
+func entityLookupBytes(name []byte) (entity, bool) {
+	i, j := 0, len(entityMap)
+	for i < j {
+		h := i + (j-i)/2
+		cmp := compareBytesToString(name, entityMap[h].name)
+		if cmp < 0 {
+			j = h
+		} else if cmp > 0 {
+			i = h + 1
+		} else {
+			return entityMap[h], true
+		}
+	}
+	return entity{}, false
+}
+
+// parseNumericEntityBytes parses numeric HTML entities (&#DDDD; / &#xHHHH;)
+// directly from a byte slice. Returns (codepoint, ok). Combines parsing
+// and validation into a single allocation-free function.
+func parseNumericEntityBytes(text []byte) (rune, bool) {
+	if len(text) < 4 || text[1] != '#' {
+		return 0xFFFD, false
+	}
+	var cp uint64
+	if text[2] == 'x' || text[2] == 'X' {
+		for i := 3; i < len(text)-1; i++ {
+			c := text[i]
+			cp <<= 4
+			switch {
+			case c >= '0' && c <= '9':
+				cp |= uint64(c - '0')
+			case c >= 'a' && c <= 'f':
+				cp |= uint64(c - 'a' + 10)
+			case c >= 'A' && c <= 'F':
+				cp |= uint64(c - 'A' + 10)
+			default:
+				return 0xFFFD, false
+			}
+		}
+	} else {
+		for i := 2; i < len(text)-1; i++ {
+			c := text[i]
+			if c < '0' || c > '9' {
+				return 0xFFFD, false
+			}
+			cp = cp*10 + uint64(c-'0')
+		}
+	}
+	// Codepoint 0: entity is valid but codepoint replaced with U+FFFD.
+	// Mirrors md4c behavior: isValidNumericEntity returns true, then
+	// render_utf8_codepoint replaces 0 with U+FFFD.
+	if cp == 0 {
+		return 0xFFFD, true
+	}
+	// Reject out-of-range codepoints (>U+10FFFF) — these are invalid entities.
+	if cp > 0x10FFFF {
+		return 0xFFFD, false
+	}
+	// Surrogate codepoints (U+D800–U+DFFF): entity is valid but codepoint
+	// replaced with U+FFFD. Mirrors md4c behavior where isValidNumericEntity
+	// returns true for valid hex/digit content even when the codepoint is invalid.
+	if cp >= 0xD800 && cp <= 0xDFFF {
+		return 0xFFFD, true
+	}
+	return rune(cp), true
+}
+
 // renderEntity translates an HTML entity to UTF-8, then passes through HTML escaping.
 // I36: C-40 — When FlagVerbatimEntities is set, outputs the raw entity text
 // verbatim (no HTML escaping). Mirrors md4c-html.c:211-213:
@@ -548,21 +654,18 @@ func (h *HTML) Text(t ast.TextType, text []byte) error {
 //	if(flags & MD_HTML_FLAG_VERBATIM_ENTITIES) { render_verbatim(r, text, size); return; }
 func (h *HTML) renderEntity(text []byte) error {
 	if h.flags&FlagVerbatimEntities != 0 {
-		// Mirrors md4c-html.c:211-213 render_verbatim.
-		// Use emitBytes to go through list buffer when inside a list.
 		h.emitBytes(text)
 		return nil
 	}
 
 	if len(text) > 3 && text[1] == '#' {
-		codepoint := h.parseNumericEntity(text)
-		if codepoint != 0xFFFD || h.isValidNumericEntity(text) {
-			return h.writeUTF8CodepointEscaped(codepoint)
+		if cp, ok := parseNumericEntityBytes(text); ok {
+			return h.writeUTF8CodepointEscaped(cp)
 		}
 		return h.writeEscaped(text)
 	}
 
-	if e, ok := entityLookup(string(text)); ok {
+	if e, ok := entityLookupBytes(text); ok {
 		if err := h.writeUTF8CodepointEscaped(e.codepoints[0]); err != nil {
 			return err
 		}
@@ -573,54 +676,6 @@ func (h *HTML) renderEntity(text []byte) error {
 	}
 
 	return h.writeEscaped(text)
-}
-
-func (h *HTML) parseNumericEntity(text []byte) rune {
-	if len(text) < 4 || text[1] != '#' {
-		return 0xFFFD
-	}
-
-	var codepoint uint64
-	var err error
-	if text[2] == 'x' || text[2] == 'X' {
-		codepoint, err = strconv.ParseUint(string(text[3:len(text)-1]), 16, 32)
-	} else {
-		codepoint, err = strconv.ParseUint(string(text[2:len(text)-1]), 10, 32)
-	}
-
-	if err != nil {
-		return 0xFFFD
-	}
-
-	if codepoint == 0 || codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
-		return 0xFFFD
-	}
-	return rune(codepoint)
-}
-
-func (h *HTML) isValidNumericEntity(text []byte) bool {
-	if len(text) < 4 || text[1] != '#' || text[len(text)-1] != ';' {
-		return false
-	}
-
-	if text[2] == 'x' || text[2] == 'X' {
-		if len(text) < 5 {
-			return false
-		}
-		for _, c := range text[3 : len(text)-1] {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				return false
-			}
-		}
-		return len(text) > 4
-	}
-
-	for _, c := range text[2 : len(text)-1] {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(text) > 3
 }
 
 func (h *HTML) writeUTF8Codepoint(cp rune) error {
@@ -715,10 +770,9 @@ func (h *HTML) renderEntityToFn(text []byte, fn func([]byte)) {
 	}
 
 	if len(text) > 3 && text[1] == '#' {
-		codepoint := h.parseNumericEntity(text)
-		if codepoint != 0xFFFD || h.isValidNumericEntity(text) {
+		if cp, ok := parseNumericEntityBytes(text); ok {
 			var buf [4]byte
-			n := encodeUTF8(codepoint, buf[:])
+			n := encodeUTF8(cp, buf[:])
 			if n > 0 {
 				fn(buf[:n])
 			} else {
@@ -730,7 +784,7 @@ func (h *HTML) renderEntityToFn(text []byte, fn func([]byte)) {
 		return
 	}
 
-	if e, ok := entityLookup(string(text)); ok {
+	if e, ok := entityLookupBytes(text); ok {
 		var buf [4]byte
 		n := encodeUTF8(e.codepoints[0], buf[:])
 		if n > 0 {
@@ -830,7 +884,7 @@ func (h *HTML) writeEscaped(text []byte) error {
 
 func (h *HTML) renderOpenH(detail any) {
 	if d, ok := detail.(*ast.HeadingDetail); ok {
-		h.emitStr(fmt.Sprintf("<h%d>", d.Level))
+		h.emitStr(headingOpenTags[d.Level])
 	} else {
 		h.emitStr("<h1>")
 	}
@@ -838,7 +892,7 @@ func (h *HTML) renderOpenH(detail any) {
 
 func (h *HTML) renderCloseH(detail any) {
 	if d, ok := detail.(*ast.HeadingDetail); ok {
-		h.emitStr(fmt.Sprintf("</h%d>\n", d.Level))
+		h.emitStr(headingCloseTags[d.Level])
 	} else {
 		h.emitStr("</h1>\n")
 	}
@@ -846,7 +900,10 @@ func (h *HTML) renderCloseH(detail any) {
 
 func (h *HTML) renderOpenOL(detail any) {
 	if d, ok := detail.(*ast.OLDetail); ok && d.Start != 1 {
-		h.emitStr(fmt.Sprintf("<ol start=\"%d\">\n", d.Start))
+		h.emitStr("<ol start=\"")
+		var tmp [20]byte
+		h.emitBytes(strconv.AppendInt(tmp[:0], int64(d.Start), 10))
+		h.emitStr("\">\n")
 	} else {
 		h.emitStr("<ol>\n")
 	}
@@ -920,7 +977,10 @@ func (h *HTML) renderOpenAdmonition(detail any) {
 
 func (h *HTML) renderOpenFootnoteDef(detail any) {
 	if d, ok := detail.(*ast.FootnoteDefDetail); ok {
-		h.emitStr(fmt.Sprintf("<li id=\"fn-%d\">\n", d.ID))
+		h.emitStr("<li id=\"fn-")
+		var tmp [20]byte
+		h.emitBytes(strconv.AppendUint(tmp[:0], uint64(d.ID), 10))
+		h.emitStr("\">\n")
 	} else {
 		h.emitStr("<li>\n")
 	}
@@ -932,7 +992,12 @@ func (h *HTML) renderCloseFootnoteDef(detail any) {
 			if refIndex > 1 {
 				h.emitStr(" ")
 			}
-			h.emitStr(fmt.Sprintf("<a href=\"#fnref-%d-%d\" class=\"footnote-backref\">&#8617;</a>", d.ID, refIndex))
+			h.emitStr("<a href=\"#fnref-")
+			var tmp [20]byte
+			h.emitBytes(strconv.AppendUint(tmp[:0], uint64(d.ID), 10))
+			h.emitStr("-")
+			h.emitBytes(strconv.AppendUint(tmp[:0], uint64(refIndex), 10))
+			h.emitStr("\" class=\"footnote-backref\">&#8617;</a>")
 		}
 	}
 	h.emitStr("\n</li>\n")
@@ -990,8 +1055,16 @@ func (h *HTML) renderOpenWikilink(detail any) {
 
 func (h *HTML) renderOpenFootnoteRef(detail any) {
 	if d, ok := detail.(*ast.FootnoteRefDetail); ok {
-		h.emitStr(fmt.Sprintf("<sup><a href=\"#fn-%d\" id=\"fnref-%d-%d\">%d</a></sup>",
-			d.ID, d.ID, d.RefID, d.ID))
+		h.emitStr("<sup><a href=\"#fn-")
+		var tmp [20]byte
+		h.emitBytes(strconv.AppendUint(tmp[:0], uint64(d.ID), 10))
+		h.emitStr("\" id=\"fnref-")
+		h.emitBytes(strconv.AppendUint(tmp[:0], uint64(d.ID), 10))
+		h.emitStr("-")
+		h.emitBytes(strconv.AppendUint(tmp[:0], uint64(d.RefID), 10))
+		h.emitStr("\">")
+		h.emitBytes(strconv.AppendUint(tmp[:0], uint64(d.ID), 10))
+		h.emitStr("</a></sup>")
 	} else {
 		h.emitStr("<sup><a href=\"#fn-1\" id=\"fnref-1-1\">1</a></sup>")
 	}

@@ -23,11 +23,22 @@
  *   const html = s.finishHTML();
  *   s.dispose();
  *
- *   // Custom renderer — extract structured data (场景5)
+ *   // Stream + custom renderer — extract links from streamed input
+ *   const s2 = md4go.createStreamParser();
+ *   s2.write("[a](https://x.com) and [b](https://y.com)");
  *   const links = [];
- *   md4go.parseWithRenderer("see [link](url)", {
+ *   s2.finishWithRenderer({
  *     enterSpan(type, detail) {
  *       if (type === md4go.SpanType.SpanLink) links.push(detail.href);
+ *     },
+ *   });
+ *   s2.dispose();
+ *
+ *   // Custom renderer — extract structured data (场景5)
+ *   const links3 = [];
+ *   md4go.parseWithRenderer("see [link](url)", {
+ *     enterSpan(type, detail) {
+ *       if (type === md4go.SpanType.SpanLink) links3.push(detail.href);
  *     },
  *   });
  *
@@ -96,10 +107,13 @@ const TextType = Object.freeze({
 
 // ─── Flags constants ─────────────────────────────────────────────────
 
-/** Parser flag presets. */
+/** Parser flag presets mirroring Go's parser.Dialect* constants. */
 const Flags = Object.freeze({
   CommonMark: 0,
-  GitHub: 1,
+  // DialectGitHub =
+  //   PermissiveAutolinks(0x40C) | Tables(0x100) | Strikethrough(0x200) |
+  //   Tasklists(0x800) | Admonitions(0x80000) | Footnotes(0x100000)
+  GitHub: 0x180F0C,
 });
 
 /** HTML renderer flags bitmask. */
@@ -156,30 +170,39 @@ export async function initMd4go(wasmPath = DEFAULT_WASM_PATH) {
 
   // ── One-shot APIs ──────────────────────────────────────────────
 
-  function parseToHTML(md, flagsOrOptions = 1) {
+  function parseToHTML(md, flagsOrOptions) {
     if (typeof flagsOrOptions === 'object' && flagsOrOptions !== null) {
       return parseToHTMLWithOptions(md, flagsOrOptions);
     }
-    return globalThis.md4goParseToHTML(md, flagsOrOptions);
+    if (flagsOrOptions !== undefined) {
+      return globalThis.md4goParseToHTML(md, flagsOrOptions);
+    }
+    // Omit 2nd arg → Go getFlags() uses DialectGitHub by default.
+    return globalThis.md4goParseToHTML(md);
   }
 
-  function parseToText(md, flags = 1) {
-    return globalThis.md4goParseToText(md, flags);
+  function parseToText(md, flags) {
+    if (flags !== undefined) {
+      return globalThis.md4goParseToText(md, flags);
+    }
+    return globalThis.md4goParseToText(md);
   }
 
   function parseToHTMLWithOptions(md, options = {}) {
     if (globalThis.md4goParseToHTMLWithOptions) {
       return globalThis.md4goParseToHTMLWithOptions(md, options);
     }
-    const flags = options.flags ?? 1;
+    // Fallback for old WASM binaries without native WithOptions support.
+    const flags = options.flags ?? Flags.GitHub;
     return globalThis.md4goParseToHTML(md, flags);
   }
 
-  function parseWithRenderer(md, flagsOrCallbacks = 1, callbacks) {
-    let flags = 1;
+  function parseWithRenderer(md, flagsOrCallbacks, callbacks) {
+    let flags;
     let cbs = null;
 
     if (isCallbacksObject(flagsOrCallbacks)) {
+      // (md, callbacksObj) → omit flags; Go extractRendererArgs uses DialectGitHub default
       cbs = flagsOrCallbacks;
     } else {
       flags = flagsOrCallbacks;
@@ -189,7 +212,11 @@ export async function initMd4go(wasmPath = DEFAULT_WASM_PATH) {
     if (!globalThis.md4goParseWithRenderer) {
       return { error: 'md4goParseWithRenderer not available (rebuild WASM required)' };
     }
-    return globalThis.md4goParseWithRenderer(md, flags, cbs);
+    // Only pass flags when explicitly set; otherwise Go uses DialectGitHub by default.
+    if (flags !== undefined) {
+      return globalThis.md4goParseWithRenderer(md, flags, cbs);
+    }
+    return globalThis.md4goParseWithRenderer(md, cbs);
   }
 
   // ── Parser reuse ───────────────────────────────────────────────
@@ -202,7 +229,7 @@ export async function initMd4go(wasmPath = DEFAULT_WASM_PATH) {
    * @param {number} [flags=1] - Parser flags (0=CommonMark, 1=GFM)
    * @returns {{parseToHTML, parseToText, parseWithRenderer, dispose}}
    */
-  function createParser(flags = 1) {
+  function createParser(flags = Flags.GitHub) {
     if (!globalThis.md4goCreateParser) {
       return {
         parseToHTML: () => '',
@@ -218,18 +245,26 @@ export async function initMd4go(wasmPath = DEFAULT_WASM_PATH) {
 
   /**
    * Create a chunk-accumulating stream parser for large documents.
-   * Feed chunks via write(), then call finishHTML() or finishText()
-   * to parse the complete document.
+   * Feed chunks via write(), then call one of the finish methods
+   * to parse the complete document:
+   *   - finishHTML(rendererFlags?) → string
+   *   - finishText() → string
+   *   - finishWithRenderer(callbacksObj) → null | {error}
+   *
+   * finishWithRenderer lets you implement custom business logic
+   * (e.g. extract links, build outlines) on stream-accumulated input,
+   * using the same callback pattern as parseWithRenderer.
    *
    * @param {number} [flags=1] - Parser flags (0=CommonMark, 1=GFM)
-   * @returns {{write, finishHTML, finishText, dispose}}
+   * @returns {{write, finishHTML, finishText, finishWithRenderer, dispose}}
    */
-  function createStreamParser(flags = 1) {
+  function createStreamParser(flags) {
     if (!globalThis.md4goCreateStreamParser) {
       return {
         write: () => {},
         finishHTML: () => '',
         finishText: () => '',
+        finishWithRenderer: () => ({ error: 'rebuild WASM required' }),
         dispose: () => {},
       };
     }

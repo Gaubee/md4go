@@ -20,7 +20,7 @@ func TestShortcutReferenceLink(t *testing.T) {
 	ms.refDefs = refDefs
 	ms.unresolvedLinkHead = -1
 	ms.unresolvedLinkTail = -1
-	collectMarks(&ms, []byte(input), &markCharMap, 0)
+	collectMarks(&ms, []byte(input), &markCharMap, compatConfig{}, 0)
 	ms.analyzeMarks([]byte(input))
 	ms.resolveBrackets([]byte(input), 0)
 
@@ -60,7 +60,7 @@ func TestAnalyzeBracket(t *testing.T) {
 			ms.refDefs = make(map[string]*RefDef)
 			ms.unresolvedLinkHead = -1
 			ms.unresolvedLinkTail = -1
-			collectMarks(&ms, []byte(tc.input), &markCharMap, 0)
+			collectMarks(&ms, []byte(tc.input), &markCharMap, compatConfig{}, 0)
 			ms.analyzeMarks([]byte(tc.input))
 			ms.resolveBrackets([]byte(tc.input), 0)
 
@@ -160,7 +160,7 @@ func TestNormalizeLinkLabel(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			got := string(normalizeLinkLabel([]byte(tc.input)))
+			got := string(normalizeLinkLabel([]byte(tc.input), nil))
 			if got != tc.want {
 				t.Errorf("normalizeLinkLabel(%q) = %q, want %q", tc.input, got, tc.want)
 			}

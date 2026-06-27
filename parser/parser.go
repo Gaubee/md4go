@@ -11,17 +11,20 @@
 package parser
 
 import (
+	"maps"
+
 	"github.com/userpro/md4go/ast"
 	"github.com/userpro/md4go/renderer"
 	"github.com/userpro/md4go/stream"
 )
 
-// Parser is the reusable parser, analogous to md4c's MD_CTX.
+// Parser is the reusable parser.
 type Parser struct {
-	flags     Flags
-	compat    compatConfig // pre-computed compatibility behavior decisions
-	triggers  *triggerTable
-	markChars [256]bool // per-parser mark character map (extensions can add chars)
+	flags             Flags
+	compat            compatConfig
+	triggers          *triggerTable
+	markChars         [256]bool
+	tableProtectedBuf []bool // reusable buffer for splitTableCells
 }
 
 // New creates a Parser with the given flags and optional extenders.
@@ -77,32 +80,27 @@ func (discardRenderer) Text(ast.TextType, []byte) error     { return nil }
 // so forward references work. Mirrors md4c md_parse() two-pass approach:
 //   - Pass 1: scan all blocks, collect refdefs (mirrors md4c first pass)
 //   - Pass 2: full rendering with pre-populated refDefs (mirrors md_process_all_blocks)
+//
+// Contexts are pooled via sync.Pool to preserve mark slice capacity across
+// Parse() calls, reducing GC pressure in repeated parsing scenarios.
 func (p *Parser) Parse(src []byte, r renderer.Renderer) error {
 	// Pass 1: collect all refdefs (including forward references)
-	// Mirrors md4c md_process_doc() first pass which builds the refdef hashtable
-	// before md_process_all_blocks() does inline processing.
-	preCtx := &context{}
+	preCtx := getContext()
 	preCtx.reset()
-	p.parseLinesInternal(stream.NewSliceSource(src), discardRenderer{}, preCtx)
+	err := p.parseLinesInternal(stream.NewSliceSource(src), discardRenderer{}, preCtx)
 
 	// Pass 2: full rendering with pre-collected refdefs
-	ctx := &context{}
+	ctx := getContext()
 	ctx.reset()
-	// Pre-populate refDefs from first pass so forward references resolve
-	if len(preCtx.refDefs) > 0 {
-		for k, v := range preCtx.refDefs {
-			ctx.refDefs[k] = v
-		}
-		ctx.stk.refDefs = ctx.refDefs
+	copyRefDefsFrom(ctx, preCtx)
+
+	if err == nil {
+		err = p.parseLinesInternal(stream.NewSliceSource(src), r, ctx)
 	}
-	// I33: Pre-populate footnoteDefs from first pass
-	if len(preCtx.footnoteDefs) > 0 {
-		for k, v := range preCtx.footnoteDefs {
-			ctx.footnoteDefs[k] = v
-		}
-		ctx.stk.footnoteDefs = ctx.footnoteDefs
-	}
-	return p.parseLinesInternal(stream.NewSliceSource(src), r, ctx)
+
+	putContext(preCtx)
+	putContext(ctx)
+	return err
 }
 
 // ParseStream parses from a LineSource and pushes events to r.
@@ -110,9 +108,76 @@ func (p *Parser) Parse(src []byte, r renderer.Renderer) error {
 // Refdefs are first-seen-first; forward references degrade to literal text.
 // Mirrors md4c's incremental line-by-line architecture.
 func (p *Parser) ParseStream(src stream.LineSource, r renderer.Renderer) error {
-	ctx := &context{}
+	ctx := getContext()
 	ctx.reset()
-	return p.parseLinesInternal(src, r, ctx)
+	err := p.parseLinesInternal(src, r, ctx)
+	putContext(ctx)
+	return err
+}
+
+// ParseBlocksOnly parses src and emits only block-level events (EnterBlock /
+// LeaveBlock), skipping the entire inline analysis pipeline. No Span events are
+// emitted; only block structural identity is communicated.
+//
+// This is significantly faster than Parse + NullRenderer for use cases that
+// only need document structure:
+//   - Heading extraction / TOC generation
+//   - Block type counting and statistics
+//   - Syntax validation (checking if a document is parseable)
+//   - Bulk pre-check pipelines (thousands of documents)
+//
+// The two-pass approach is retained (Pass 1 collects refdefs so refdef-only
+// paragraphs are correctly suppressed as block content). Pass 2 processes
+// blocks with ctx.noInline=true, skipping assembleBlockText and the full
+// collectMarks → analyzeMarks → resolveBrackets → analyzeLinkContents →
+// processInlines chain inside emitBlock.
+//
+// Code block TextCode and HTML block TextHTML events are still emitted
+// (they don't go through the inline pipeline).
+func (p *Parser) ParseBlocksOnly(src []byte, r renderer.Renderer) error {
+	// Pass 1: collect all refdefs (so refdef paragraphs are correctly suppressed)
+	preCtx := getContext()
+	preCtx.reset()
+	err := p.parseLinesInternal(stream.NewSliceSource(src), discardRenderer{}, preCtx)
+
+	// Pass 2: block-level only — skip the inline pipeline
+	ctx := getContext()
+	ctx.reset()
+	ctx.noInline = true
+	copyRefDefsFrom(ctx, preCtx)
+
+	if err == nil {
+		err = p.parseLinesInternal(stream.NewSliceSource(src), r, ctx)
+	}
+
+	putContext(preCtx)
+	putContext(ctx)
+	return err
+}
+
+// ParseBlocksOnlyStream parses from a LineSource and emits only block-level events.
+// Stream variant of ParseBlocksOnly — single pass, no refdef pre-collection.
+// Refdefs are first-seen-first; forward references degrade to literal text.
+func (p *Parser) ParseBlocksOnlyStream(src stream.LineSource, r renderer.Renderer) error {
+	ctx := getContext()
+	ctx.reset()
+	ctx.noInline = true
+	err := p.parseLinesInternal(src, r, ctx)
+	putContext(ctx)
+	return err
+}
+
+// copyRefDefsFrom copies reference and footnote definitions from src to dst,
+// including the markStacks pointers so that inline resolution can find them.
+func copyRefDefsFrom(dst, src *context) {
+	if len(src.refDefs) > 0 {
+		maps.Copy(dst.refDefs, src.refDefs)
+		dst.stk.refDefs = dst.refDefs
+	}
+	if len(src.footnoteDefs) > 0 {
+		maps.Copy(dst.footnoteDefs, src.footnoteDefs)
+		dst.stk.footnoteDefs = dst.footnoteDefs
+	}
 }
 
 // processFootnoteDefs emits footnote definitions that were referenced,
@@ -177,7 +242,7 @@ func (p *Parser) processFootnoteDefs(ctx *context, r renderer.Renderer) error {
 			// Assemble footnote content text directly from content lines,
 			// without save/restore of ctx.blk. processBlockInlines accepts
 			// pre-assembled blockText, so no temp block is needed.
-			blockText := assembleTextFromLines(def.ContentLines[:def.NContentLines])
+			blockText := assembleTextFromLines(def.ContentLines[:def.NContentLines], &ctx.blockTextBuf)
 
 			// Reset marks for footnote processing
 			ctx.stk.reset()
@@ -204,7 +269,7 @@ func (p *Parser) processFootnoteDefs(ctx *context, r renderer.Renderer) error {
 //	    analyzeLine → processLine
 //	    (processLine emits block events on close → inline analysis → text events)
 //	endCurrentBlock         ← close any trailing open block
-//	closeAllContainers      ← close remaining open containers (md_leave_child_containers)
+//	leaveContainers         ← close remaining open containers (md_leave_child_containers)
 //	MD_LEAVE_BLOCK(DOC)
 func (p *Parser) parseLinesInternal(src stream.LineSource, r renderer.Renderer, ctx *context) error {
 

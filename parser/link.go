@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"bytes"
+
 	"github.com/userpro/md4go/ast"
 	"unicode"
 	"unicode/utf8"
@@ -188,7 +190,7 @@ func (ms *markStacks) resolveBracketFootnote(blockText []byte,
 
 	// Look up the footnote definition
 	label := blockText[labelBeg:labelEnd]
-	normalized := normalizeLinkLabel(label)
+	normalized := normalizeLinkLabel(label, ms.labelNormBuf)
 	if len(normalized) == 0 {
 		return false
 	}
@@ -209,14 +211,8 @@ func (ms *markStacks) resolveBracketFootnote(blockText []byte,
 
 	// Store the footnote reference details in the dummy mark after the opener.
 	// Mirrors md4c.c:3854-3858: index_mark->beg = def->index; index_mark->end = def->ref_count.
-	// We store these in linkAttrMap instead.
 	ms.storeLinkAttrs(openerIndex, nil, nil)
-	if ms.linkAttrMap != nil {
-		attrs := ms.linkAttrMap[openerIndex]
-		attrs.footnoteID = footnoteDef.Index
-		attrs.footnoteRefID = footnoteDef.RefCount
-		ms.linkAttrMap[openerIndex] = attrs
-	}
+	ms.setLinkAttrFootnote(openerIndex, footnoteDef.Index, footnoteDef.RefCount)
 
 	// Mark as resolved with FOOTNOTE flag
 	opener.Flags |= markOpener | markResolved | markBracketFootnote
@@ -354,24 +350,84 @@ type linkAttrs struct {
 	footnoteRefID uint // I33: for footnote references, the 1-based ref_id among same footnote
 }
 
+// linkAttrSlot is a single slot in the fixed-size inline array (linkAttrSlots [4]).
+// Stores the opener mark index and its associated link attributes.
+// 99%+ of blocks have 0-1 links, so the array avoids per-block map allocation.
+type linkAttrSlot struct {
+	openerIndex int
+	attrs       linkAttrs
+}
+
 // storeLinkAttrs stores the href and title for a resolved link at the given opener index.
+// Uses the inline linkAttrSlots array for ≤4 links (common case, zero allocation).
+// Falls back to per-block map allocation only when >4 links.
 func (ms *markStacks) storeLinkAttrs(openerIndex int, href, title []byte) {
+	if ms.linkAttrCount < len(ms.linkAttrSlots) {
+		ms.linkAttrSlots[ms.linkAttrCount] = linkAttrSlot{openerIndex, linkAttrs{href: href, title: title}}
+		ms.linkAttrCount++
+		return
+	}
+	// Fallback: migrate existing slots to map, then store in map.
 	if ms.linkAttrMap == nil {
-		ms.linkAttrMap = make(map[int]linkAttrs)
+		ms.linkAttrMap = make(map[int]linkAttrs, ms.linkAttrCount+1)
+		for i := 0; i < ms.linkAttrCount; i++ {
+			s := &ms.linkAttrSlots[i]
+			ms.linkAttrMap[s.openerIndex] = s.attrs
+		}
 	}
 	ms.linkAttrMap[openerIndex] = linkAttrs{href: href, title: title}
 }
 
 // getLinkAttrs retrieves the stored href and title for a resolved link.
+// Checks inline slots first (linear scan of ≤4 entries), then falls back to map.
 func (ms *markStacks) getLinkAttrs(openerIndex int) (href, title []byte) {
-	if ms.linkAttrMap == nil {
-		return nil, nil
+	// Fast path: check inline slots
+	for i := 0; i < ms.linkAttrCount; i++ {
+		if ms.linkAttrSlots[i].openerIndex == openerIndex {
+			return ms.linkAttrSlots[i].attrs.href, ms.linkAttrSlots[i].attrs.title
+		}
 	}
-	attr, ok := ms.linkAttrMap[openerIndex]
-	if !ok {
-		return nil, nil
+	// Fallback: check map (only non-nil when >4 links were stored)
+	if ms.linkAttrMap != nil {
+		if attr, ok := ms.linkAttrMap[openerIndex]; ok {
+			return attr.href, attr.title
+		}
 	}
-	return attr.href, attr.title
+	return nil, nil
+}
+
+// getLinkAttrsFull returns the full linkAttrs (including footnote fields) for
+// the given opener index. Used by footnote reference emission.
+func (ms *markStacks) getLinkAttrsFull(openerIndex int) (linkAttrs, bool) {
+	for i := 0; i < ms.linkAttrCount; i++ {
+		if ms.linkAttrSlots[i].openerIndex == openerIndex {
+			return ms.linkAttrSlots[i].attrs, true
+		}
+	}
+	if ms.linkAttrMap != nil {
+		if attr, ok := ms.linkAttrMap[openerIndex]; ok {
+			return attr, true
+		}
+	}
+	return linkAttrs{}, false
+}
+
+// setLinkAttrFootnote sets footnoteID and footnoteRefID on a previously stored
+// linkAttrs entry. Updates both inline slots and map fallback.
+func (ms *markStacks) setLinkAttrFootnote(openerIndex int, footnoteID, footnoteRefID uint) {
+	for i := 0; i < ms.linkAttrCount; i++ {
+		if ms.linkAttrSlots[i].openerIndex == openerIndex {
+			ms.linkAttrSlots[i].attrs.footnoteID = footnoteID
+			ms.linkAttrSlots[i].attrs.footnoteRefID = footnoteRefID
+			return
+		}
+	}
+	if ms.linkAttrMap != nil {
+		attrs := ms.linkAttrMap[openerIndex]
+		attrs.footnoteID = footnoteID
+		attrs.footnoteRefID = footnoteRefID
+		ms.linkAttrMap[openerIndex] = attrs
+	}
 }
 
 // isInlineLinkSpec parses an inline link specification starting at off
@@ -440,7 +496,7 @@ func (ms *markStacks) isLinkReference(blockText []byte, beg, end int) ([]byte, [
 	}
 
 	// Normalize label: collapse whitespace, case-fold
-	normalized := normalizeLinkLabel(label)
+	normalized := normalizeLinkLabel(label, ms.labelNormBuf)
 	if len(normalized) == 0 {
 		return nil, nil, false
 	}
@@ -479,7 +535,11 @@ func extractLinkLabel(text []byte, beg, end int) []byte {
 // normalizeLinkLabel normalizes a link label per CommonMark §4.7:
 // strip leading/trailing whitespace, collapse internal whitespace to single space,
 // Unicode case-fold. Mirrors md4c md_link_label_cmp() which uses Unicode fold map.
-func normalizeLinkLabel(label []byte) []byte {
+//
+// buf is an optional reusable byte slice pointer. When non-nil, *buf is reset and
+// reused as the output buffer instead of allocating a new one. The caller must not
+// retain the returned slice beyond the next call with the same buf.
+func normalizeLinkLabel(label []byte, buf *[]byte) []byte {
 	// Strip leading/trailing whitespace
 	start, end := 0, len(label)
 	for start < end && isWhitespace(label[start]) {
@@ -492,8 +552,16 @@ func normalizeLinkLabel(label []byte) []byte {
 		return nil
 	}
 
+	// Use provided buffer or allocate new one
+	var result []byte
+	if buf != nil {
+		*buf = (*buf)[:0]
+		result = *buf
+	} else {
+		result = make([]byte, 0, end-start)
+	}
+
 	// Collapse internal whitespace and case-fold using Unicode case folding
-	result := make([]byte, 0, end-start)
 	inSpace := false
 	for i := start; i < end; {
 		c := label[i]
@@ -521,6 +589,10 @@ func normalizeLinkLabel(label []byte) []byte {
 			}
 			i += size
 		}
+	}
+
+	if buf != nil {
+		*buf = result
 	}
 	return result
 }
@@ -862,6 +934,11 @@ type RefDef struct {
 // is removed; all other characters are kept as-is.
 // Mirrors md4c's approach of processing escapes during extraction.
 func resolveBackslashEscapes(text []byte) []byte {
+	// Fast path: most link destinations have no backslashes.
+	// Return the original slice directly for zero-copy in the common case.
+	if bytes.IndexByte(text, '\\') < 0 {
+		return text
+	}
 	result := make([]byte, 0, len(text))
 	for i := 0; i < len(text); i++ {
 		if text[i] == '\\' && i+1 < len(text) && (isASCIIPunct(text[i+1]) || text[i+1] == '\n') {
