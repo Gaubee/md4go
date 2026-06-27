@@ -135,6 +135,42 @@ text.ConvertStream(file, os.Stdout, text.WithFlags(parser.DialectGitHub))
 
 > **Note**: In streaming mode, reference link definitions (refdefs) follow a "first-seen-first-served" rule — forward references degrade to literal text. One-shot parsing (`Convert`) has no such limitation.
 
+### Scenario 3b: Streaming with State Preservation (Continuation)
+
+`ConvertStream`/`ParseStream` reset the parser context on each call — they treat
+every batch as an independent document. That is fine for a one-pass file
+conversion, but it breaks when a structure spans multiple calls (a code block
+opened in one chunk and closed in another, or a paragraph fed line-by-line).
+
+`ParseStreamContinue` / `ParseStreamEnd` expose md4c's native continuation
+semantics: a single parser context is fed lines incrementally, so block and
+container state survives chunk boundaries. This is what a front-of-pipe guard
+(e.g. a custom-syntax detector) uses to query `InProtectedBlock()` mid-stream and
+decide whether a marker at the current cursor sits inside a verbatim block.
+
+```go
+p := md4go.New(md4go.WithFlags(parser.DialectCommonMark))
+r := myRenderer{}
+
+// Feed lines as they arrive (across network chunks, LLM tokens, etc.).
+// Block/container state is preserved across Continue calls.
+for _, line := range chunkedLines {
+    if p.InProtectedBlock() {
+        // cursor currently inside a code/html block — don't intercept markers here
+    }
+    p.ParseStreamContinue(lineSourceFor(line), r)
+}
+// Finalize once at end-of-stream: closes trailing blocks, emits footnotes,
+// leaves the Doc block, and clears continuation state.
+p.ParseStreamEnd(r)
+```
+
+`InProtectedBlock()` reports whether the cursor is currently inside a fenced or
+indented code block or an HTML block, read live from the parser context. It is
+accurate even though md4c's block events are deferred by a one-line lookahead —
+the internal context state is current after each fed line, so the guard sees the
+true state before emitting events for it.
+
 ### Scenario 4: WebAssembly (Browser)
 
 md4go compiles to WebAssembly for browser-side Markdown parsing. See [`wasm/README.md`](wasm/README.md) for details.
@@ -199,6 +235,16 @@ p.Parse(src, myRenderer)
 
 // Stream-parse io.Reader → push events to renderer
 p.ParseStream(lineSource, myRenderer)
+
+// Stream-parse with state preserved across calls (continuation mode).
+// First Continue opens the document; subsequent calls reuse the parser context
+// so block/container state survives chunk boundaries. ParseStreamEnd finalizes.
+p.ParseStreamContinue(lineSource, myRenderer)
+p.ParseStreamEnd(myRenderer)   // call once at end-of-stream
+
+// Live query: is the cursor currently inside a fenced/indented code block or
+// HTML block? Only meaningful between ParseStreamContinue calls.
+if p.InProtectedBlock() { /* cursor is in verbatim content */ }
 ```
 
 ### `text` Package — Plain Text
@@ -267,12 +313,13 @@ type Renderer interface {
 
 ### Choosing an Input Mode
 
-| Mode | API | Memory | Forward References |
-|---|---|---|---|
-| One-shot `[]byte` | `Parse` / `Convert` | O(n) | ✅ Fully supported |
-| Streaming `io.Reader` | `ParseStream` / `ConvertStream` | O(line) | ❌ First-seen-first-served |
+| Mode | API | Memory | Forward References | Cross-chunk state |
+|---|---|---|---|---|
+| One-shot `[]byte` | `Parse` / `Convert` | O(n) | ✅ Fully supported | N/A |
+| Streaming `io.Reader` | `ParseStream` / `ConvertStream` | O(line) | ❌ First-seen-first-served | ❌ Reset per call |
+| Streaming continuation (incremental) | `ParseStreamContinue` / `End` | O(line) | ❌ First-seen-first-served | ✅ Preserved across calls |
 
-**Recommendation**: use `Convert` for documents < 10 MB; use `ConvertStream` for very large documents.
+**Recommendation**: use `Convert` for documents < 10 MB; use `ConvertStream` for very large documents; use `ParseStreamContinue`/`End` when block/container state must survive chunk boundaries (e.g. a front-of-pipe custom-syntax guard, or token-by-token LLM streaming).
 
 ### Choosing a Render Target
 

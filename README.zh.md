@@ -135,6 +135,30 @@ text.ConvertStream(file, os.Stdout, text.WithFlags(parser.DialectGitHub))
 
 > **注意**：流式模式下 refdef（引用链接定义）遵循"先见先得"规则，前向引用会退化为字面文本。一次性解析（`Convert`）无此限制。
 
+### 场景 3b：带状态保持的流式（续接模式）
+
+`ConvertStream`/`ParseStream` 每次调用都会重置解析上下文——把每一批当作独立文档。这对一次性文件转换没问题，但当结构跨调用时就会出错（代码块在某个 chunk 开启、在另一个 chunk 关闭，或逐行喂入的段落）。
+
+`ParseStreamContinue` / `ParseStreamEnd` 暴露了 md4c 原生的续接语义：一个解析上下文被增量地喂入行，block 与容器状态跨 chunk 边界保留。前置管道守卫（例如自定义语法探测器）正是用它在中途查询 `InProtectedBlock()`，判断当前光标处的标记是否落在受保护（verbatim）块内。
+
+```go
+p := md4go.New(md4go.WithFlags(parser.DialectCommonMark))
+r := myRenderer{}
+
+// 行随到达逐条喂入（跨网络 chunk、LLM token 等）。
+// block/容器状态跨 Continue 调用保留。
+for _, line := range chunkedLines {
+    if p.InProtectedBlock() {
+        // 当前光标在代码/html 块内——此处不要拦截标记
+    }
+    p.ParseStreamContinue(lineSourceFor(line), r)
+}
+// 流结束时一次性收尾：关闭尾部 block、发出脚注、离开 Doc 块、清空续接状态。
+p.ParseStreamEnd(r)
+```
+
+`InProtectedBlock()` 报告当前光标是否在围栏/缩进代码块或 HTML 块内，直接从解析上下文实时读取。即便 md4c 的 block 事件因一行前瞻而延迟，内部上下文状态在每次喂入后都是当前的，所以守卫在事件发出前就能看到真实状态。
+
 ### 场景 4：WebAssembly（浏览器端）
 
 md4go 可编译为 WebAssembly，在浏览器端直接解析 Markdown。详见 [`wasm/README.md`](wasm/README.md)。
@@ -199,6 +223,14 @@ p.Parse(src, myRenderer)
 
 // 流式解析 io.Reader → 推送事件到 renderer
 p.ParseStream(lineSource, myRenderer)
+
+// 带状态保持的续接流式解析。首次 Continue 打开文档；后续调用复用解析上下文，
+// 使 block/容器状态跨 chunk 边界保留。ParseStreamEnd 收尾。
+p.ParseStreamContinue(lineSource, myRenderer)
+p.ParseStreamEnd(myRenderer)   // 流结束时调用一次
+
+// 实时查询：当前光标是否在围栏/缩进代码块或 HTML 块内？仅在 Continue 调用之间有意义。
+if p.InProtectedBlock() { /* 光标在 verbatim 内容内 */ }
 ```
 
 ### `text` 包 — 纯文本
@@ -267,12 +299,13 @@ type Renderer interface {
 
 ### 选择输入方式
 
-| 方式 | API | 内存 | 前向引用 |
-|---|---|---|---|
-| 一次性 `[]byte` | `Parse` / `Convert` | O(n) | ✅ 完整支持 |
-| 流式 `io.Reader` | `ParseStream` / `ConvertStream` | O(行) | ❌ 先见先得 |
+| 方式 | API | 内存 | 前向引用 | 跨 chunk 状态 |
+|---|---|---|---|---|
+| 一次性 `[]byte` | `Parse` / `Convert` | O(n) | ✅ 完整支持 | N/A |
+| 流式 `io.Reader` | `ParseStream` / `ConvertStream` | O(行) | ❌ 先见先得 | ❌ 每次调用重置 |
+| 流式续接（增量） | `ParseStreamContinue` / `End` | O(行) | ❌ 先见先得 | ✅ 跨调用保留 |
 
-**建议**：文档 < 10MB 用 `Convert`，超大文档用 `ConvertStream`。
+**建议**：文档 < 10MB 用 `Convert`，超大文件用 `ConvertStream`，需要跨 chunk 保留 block 状态（如自定义语法守卫、LLM 逐 token 流）用 `ParseStreamContinue`/`End`。
 
 ### 选择渲染目标
 
