@@ -12,7 +12,7 @@ md4go/                          ← Go module root
 ├── renderer/
 │   ├── renderer.go             ← Renderer 接口（5 个回调方法）
 │   └── writer.go               ← BufWriter（带缓冲的零拷贝写入器）
-├── parser/                     ← 解析器核心（最大包，21 个源文件 + 12 个测试文件）
+├── parser/                     ← 解析器核心（最大包，22 个源文件 + 21 个测试文件）
 │   ├── parser.go               ← Parser 结构体 + Parse/ParseStream/parseLinesInternal
 │   ├── context.go              ← 解析上下文（mark 栈、line 状态）
 │   ├── block.go                ← 行分析 analyzeLine + 行处理 processLine
@@ -26,6 +26,7 @@ md4go/                          ← Go module root
 │   ├── autolink.go             ← 尖括号自动链接 + raw HTML inline 检测
 │   ├── permissive_autolink.go  ← 无尖括号 URL/email/WWW 自动链接
 │   ├── html_block.go           ← HTML 块 7 种类型判定
+│   ├── htmltext.go            ← HTML inline text 处理（CDATA/声明/处理指令）
 │   ├── attribute.go            ← 属性解析（link destination/title → Attribute）
 │   ├── refdef.go               ← 引用链接定义 + 脚注定义检测/收集
 │   ├── table.go                ← GFM 表格行解析
@@ -137,7 +138,7 @@ LeaveBlock(Doc)
 | `html.NewHTML(w)` | `html/convert.go` | 创建 XHTML 模式 HTML 渲染器 |
 | `html.NewWithFlags(w, flags)` | `html/convert.go` | 创建指定 flags 的 HTML 渲染器 |
 | `html.NewHTMLWithWriter(bw)` | `html/render.go` | 从 BufWriter 创建（测试用） |
-| `html.Flags` | `html/convert.go` | 渲染器标志位（Debug/VerbatimEntities/SkipUTF8BOM/XHTML） |
+| `html.Flags` | `html/convert.go` | 渲染器标志位（Debug/VerbatimEntities/SkipUTF8BOM/XHTML/NoXHTMLEscaping） |
 | `html.Option` | `html/convert.go` | `func(*config)` — WithFlags/WithExtensions/WithRendererFlags |
 
 ### 3.3 用户层：自定义渲染器
@@ -177,6 +178,8 @@ p.Parse([]byte("# Hello"), &MyRenderer{})
 | `parser/link.go` | `analyzeBracket()`, `resolveBrackets()` | 链接/图片/脚注/wikilink bracket 解析 |
 | `parser/refdef.go` | `consumeLinkRefDefs()`, `RefDef`, `FootnoteDef` | 引用链接定义 + 脚注定义检测/收集 |
 | `parser/flags.go` | `Flags`, `DialectCommonMark`, `DialectGitHub` | 位掩码标志 + Dialect 预设 |
+| `parser/compat.go` | `precomputeCompat()` | 兼容性 flag 决策预计算 |
+| `parser/htmltext.go` | `isHTMLInlineText()` | HTML 行内文本检测（CDATA/声明/处理指令） |
 | `parser/trigger.go` | `BlockTrigger`, `triggerTable` | 字符索引块触发器分发 |
 | `parser/extender.go` | `Extender`, `Registrar` | 扩展注入接口 |
 | `ast/events.go` | `BlockType`, `SpanType`, `TextType`, 各 `Detail` 结构体 | 事件类型枚举 + 详情结构 |

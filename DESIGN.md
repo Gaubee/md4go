@@ -78,16 +78,23 @@ LeaveBlock(DOC)
 ### 2.1 检测优先级链
 
 ```
-1. 空行检测（LineBlank）
-2. 容器标记处理（blockquote '>', list -+*digits）  ← 步骤 1
-3. 缩进计算 + 内容提取
-4. Setext 下划线检测（仅当 pivot 为段落文本）      ← 直接检测，非触发表
-5. 水平线检测（HR: --- *** ___）                   ← 直接检测，非触发表
-6. 触发表分发（ATX # / 围栏代码 `~ / HTML <）      ← 字符索引触发表
-7. 缩进代码块检测（缩进 ≥ 4）
-8. 表格行检测（含分隔行检测）
-9. 默认 → LineText（段落文本）
-10. Admonition 检测（blockquote 内 [!TYPE] 标记）  ← 后处理
+1. 缩进计算（measureIndentFrom，使用 totalIndent 支持容器内 Tab 展开）
+2. 容器标记匹配（确定 nParents：逐层剥离 > 和列表标记）
+3. Pivot-line 继承（围栏代码续行、HTML 块续行 — 最高优先级，先于其他检测）
+4. 空行检测（容器标记剥离后，剩余内容为空 → LineBlank）
+5. Setext 下划线检测（仅当 pivot 为段落文本）      ← 直接检测，非触发表
+6. 水平线检测（HR: --- *** ___）                   ← 直接检测，非触发表
+7. Brother 容器检测（已有列表中的新兄弟项）
+8. 缩进代码块检测（≥4 缩进，不中断已有段落）
+9. 新子容器检测（新的 blockquote 或列表标记）
+10. Table 续行（当前已在表格内，继续表格行）
+11. 触发表分发（ATX # / 围栏代码 `~ / HTML <）     ← 字符索引触发表
+12. Table 分隔行检测（|:---| 模式）
+13. 缩进代码回退（当不会中断段落时降级为行内文本）
+14. 默认 → LineText（段落文本）
+15. Lazy continuation（段落续行保持所有容器为父）
+16. Task list 检测（列表项的 [x]/[ ] 标记）
+17. Admonition 检测（新子 blockquote 容器内 [!TYPE] 标记）  ← 后处理
 ```
 
 ### 2.2 缩进计算与 Tab 展开
@@ -119,7 +126,7 @@ ATX 标题、围栏代码、HTML 块通过 `[256][]BlockTrigger` 触发表分发
 '<'  → htmlBlockTrigger{}   ← HTML 块（7 种类型）
 ```
 
-Setext 和 HR 不通过触发表，因为它们的检测需要在容器标记处理之前进行（CommonMark 规定 setext/HR 优先于容器嵌套）。
+Setext 和 HR 不通过触发表：HR 可由三种字符开头（`-`、`*`、`_`）且需要验证后续字符，Setext 则依赖 pivot 上下文（需上一行为段落文本）。两者在内层分析循环中排在 brother/child 容器检测之前，确保逐层剥离容器标记后能正确识别。
 
 ### 2.4 lineAnalysis 结构体
 
@@ -294,7 +301,7 @@ CommonMark 规定 `*` 和 `_` 的 opener/closer 属性取决于相邻字符的 U
 
 ## 6. 行内三阶段管线
 
-行内解析在 `analyzeInlines` 中分三个阶段执行，**顺序不可更改**：
+行内解析在 `processBlockInlines` 中分三个阶段执行，**顺序不可更改**：
 
 ```
 Phase 1: collectMarks(blockText)
@@ -565,7 +572,7 @@ if off < len(blockText) {
 
 ### 9.2 强调 span 类型推导
 
-一个 `***` mark（长度 3）需要发射 `<em><strong>`（opener）或 `</strong></em>`（closer）。`resolveEmphSpanType` 根据 mark 长度和 opener/closer 身份推导 span 序列：
+一个 `***` mark（长度 3）需要发射 `<em><strong>`（opener）或 `</strong></em>`（closer）。强调 span 类型推导逻辑内联在 `processInlines` 中（为消除 per-mark 堆分配），根据 mark 长度和 opener/closer 身份生成 span 序列：
 
 ```
 Opener（从内到外）:           Closer（从外到内）:

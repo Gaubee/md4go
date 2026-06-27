@@ -240,6 +240,7 @@ h := html.NewHTMLWithWriter(renderer.NewBufWriter(writer))
 | `FlagVerbatimEntities` | 0x0002 | 实体原样输出（不翻译为 UTF-8） |
 | `FlagSkipUTF8BOM` | 0x0004 | 跳过输入开头的 UTF-8 BOM |
 | `FlagXHTML` | 0x0008 | XHTML 自闭合标签（`<br />`） |
+| `FlagNoXHTMLEscaping` | 0x0010 | 仅转义 `& < >`（goldmark 兼容模式，不编码 `'` `"`） |
 
 ### `renderer` 包 — 接口定义
 
@@ -352,7 +353,9 @@ md4go 默认遵循 GFM/CommonMark 标准。与其他实现的差异分两类：*
 | 剥离首部 UTF-8 BOM | `FlagStripBOM` | `\ufeffHello`：默认保留 BOM；设 flag 后剥离（goldmark 行为） |
 | 删除线 `~~` 词内识别（md4c 比 cmark-gfm 更严格） | `FlagStrikethroughPermissive` | `foo~~bar~~baz`：默认不识别词内 `~~`（md4c 行为）；设 flag 后识别（cmark-gfm/goldmark 行为） |
 | 内联 HTML 标签剥离（text 渲染器） | `FlagStripHTMLTags` | `<span>html</span>`：默认保留原始 HTML；设 flag 后剥离标签为 `html`。非可见元素（`<script>`、`<style>` 等）整个内容移除，匹配 goquery DOM 文本提取行为 |
-| 表格列数严格校验 | `FlagStrictTableColumns`（不在预设中） | 标题 3 列、分隔行 2 列：默认宽松识别；设 flag 后不识别为表格。已从 `GoldmarkCompat` 移除，因 md4go 校验比 goldmark 的补齐/截断策略更严格 |
+| 表格列数严格校验 | `FlagStrictTableColumns` | 标题 3 列、分隔行 2 列：默认宽松识别；设 flag 后不识别为表格 |
+| 表格被相邻标题行中断 | `FlagTableInterruptByHeaders` | 表头行紧邻另一标题：默认识别为标题；设 flag 后识别为表头 |
+| XHTML 实体编码（HTML 渲染器） | `FlagNoXHTMLEntityEncoding` | `"` `'` 默认编码为 `&quot;` `&#39;`；设 flag 后保持原样（goldmark 行为） |
 | 行内跨度/括号多余空格 | — | goldmark DOM 遍历副作用，不应复制 |
 
 > 完整对比报告见 `DIFFCHECK_REPORT.md`。
@@ -369,6 +372,8 @@ md4go 默认遵循 GFM/CommonMark 标准。与其他实现的差异分两类：*
 | wasm/README.md | wasm/ | WebAssembly 浏览器端使用指南 |
 | diffcheck/README.md | diffcheck/ | 引擎对拍工具文档 |
 | DIFFCHECK_REPORT.md | 根目录 | 引擎对比报告（md4go / md4c / goldmark） |
+| benchmark/README.md | benchmark/ | 性能基准测试指南（md4go / md4c / goldmark） |
+| benchmark/BENCHMARK_REPORT.md | benchmark/ | 最新性能基准测试结果 |
 
 ## 致谢
 

@@ -26,9 +26,10 @@ cd diffcheck
 或手动分步编译：
 
 ```bash
-# C 二进制
+# C 二进制 (文本直渲 + HTML 管线)
 cd diffcheck/csrc
 gcc -O2 -I../../md4c/src -o md4c-plain main.c ../../md4c/src/md4c.c
+gcc -O2 -I../../md4c/src -o md4c-html main_html.c ../../md4c/src/md4c.c ../../md4c/src/md4c-html.c ../../md4c/src/entity.c
 
 # Go CLI
 cd diffcheck

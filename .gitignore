@@ -11,3 +11,4 @@ md4c
 .codebuddy
 *.wasm
 wasm_exec.js
+benchmark/result.txt

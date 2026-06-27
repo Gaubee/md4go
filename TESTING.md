@@ -16,7 +16,7 @@ md4go 的测试体系覆盖以下五大方向，对应 SOP §6.1 测试矩阵：
 | 4 | **增量管线一致性** | `Convert`([]byte) vs `ConvertStream`(io.Reader) 输出一致 + 内存有界 | `TestStreamEqualsFull*`, `TestStreamingMemory` |
 | 5 | **病态输入线性** | O(n²) 防护、线性时间、内存有界 | `TestPathological*`, `BenchmarkPathological` |
 | 6 | **Fuzz 安全** | 任意字节流无 panic、双渲染器确定性 | `FuzzParseNoPanicNoLeak` 等 |
-| 7 | **兼容性 Flag** | 25 个 flag 正交性、Dialect 预设组合、Flag 值唯一性 | `compat_flags_test.go` |
+| 7 | **兼容性 Flag** | 31 个 flag 正交性、Dialect 预设组合、Flag 值唯一性 | `flag_orthogonality_test.go`, `dialect_test.go`, `flags_test.go` |
 | 8 | **回归钉死** | I45–I62 修复的特定 bug 不复发 | `regression_*.go` |
 | 9 | **扩展集成** | `WithExtensions`/`WithFlags` API 正确组合 | `integration/extension_integration_test.go` |
 
@@ -41,10 +41,12 @@ md4go/
 │   ├── fuzz_test.go                #   Fuzz: 无 panic + 双渲染器确定性
 │   ├── concurrency_test.go         #   并发安全: 多 goroutine + HTML/Plain 混合
 │   ├── edgecase_test.go            #   健壮性: 空/海量输入 + 渲染器接口合规
+│   ├── parse_blocks_only_test.go   #   块级解析（跳过行内管线）行为验证
+│   ├── wasm_e2e_test.go            #   WebAssembly E2E 测试
 │   └── testhelpers_test.go         #   共享辅助 (mdConvertPlain/HTML, normalizeHTML)
 │
 ├── parser/                         # ══ parser 单元测试 (package parser_test) ══
-│   ├── compat_flags_test.go        #   兼容性 Flag: 正交性 + 预设组合 + 值唯一
+│   ├── flag_orthogonality_test.go   #   兼容性 Flag: 正交性 + 预设组合 + 值唯一
 │   ├── regression_test.go          #   解析器逻辑 bug 钉死 (I45–I62)
 │   ├── edgecase_test.go            #   深层嵌套 + flag 组合无 panic
 │   ├── flags_test.go               #   单个 flag 行为验证
@@ -123,12 +125,12 @@ md4go/
 - `FuzzTightLooseListSeparator` — I62 tight/loose 修复的定向 fuzz（确定性 + 无多余空行）
 - `FuzzTightLooseListDualRender` — 跨渲染器确定性验证
 
-### 3.6 兼容性 Flag (`parser/compat_flags_test.go`)
+### 3.6 兼容性 Flag (`parser/flag_orthogonality_test.go` + `parser/dialect_test.go` + `parser/flags_test.go`)
 
 - 行为修改 flag 正交性（CollapseWhitespace, PermissiveATX, NoIndentedCode, HardSoftBreaks, Underline 等）
 - 扩展语法 flag 正交性（Tables, Strikethrough, Tasklists, Footnotes, Highlight, Spoilers 等）
 - Dialect 预设组合验证（DialectCommonMark=0, DialectGitHub 组成, GoldmarkCompat 组成）
-- Flag 值唯一性（25 个 flag 均为不重叠的 2 的幂）
+- Flag 值唯一性（31 个 flag 均为不重叠的 2 的幂）
 - S-01~S-07 默认行为验证（ProtectDoublePipe, tight list 分隔符, footnote ref, NULL code span, 超长 code span 等）
 
 ### 3.7 回归测试 (`parser/regression_test.go` + `html/regression_test.go`)

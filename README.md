@@ -240,6 +240,7 @@ h := html.NewHTMLWithWriter(renderer.NewBufWriter(writer))
 | `FlagVerbatimEntities` | 0x0002 | Output entities verbatim (not translated to UTF-8) |
 | `FlagSkipUTF8BOM` | 0x0004 | Skip a leading UTF-8 BOM in the input |
 | `FlagXHTML` | 0x0008 | XHTML self-closing tags (`<br />`) |
+| `FlagNoXHTMLEscaping` | 0x0010 | Escape only `& < >` (goldmark-compatible, no `'` `"`) |
 
 ### `renderer` Package — Interface Definition
 
@@ -352,7 +353,9 @@ Major differences can be aligned via the `GoldmarkCompat` preset:
 | Leading UTF-8 BOM stripping | `FlagStripBOM` | `\ufeffHello`: BOM preserved by default; stripped with the flag (goldmark behavior) |
 | Strikethrough `~~` intraword (md4c stricter than cmark-gfm) | `FlagStrikethroughPermissive` | `foo~~bar~~baz`: `~~` not recognized intraword by default (md4c behavior); recognized with the flag (cmark-gfm/goldmark behavior) |
 | Inline HTML tag stripping (text renderer) | `FlagStripHTMLTags` | `<span>html</span>`: raw HTML preserved by default; tags stripped to `html` with the flag. Non-visible elements (`<script>`, `<style>`, etc.) have their entire content removed, matching goquery DOM text extraction |
-| Strict table column count validation | `FlagStrictTableColumns` (not in preset) | Header 3 cols, delimiter 2 cols: loosely recognized by default; not recognized as a table with the flag. Excluded from `GoldmarkCompat` because md4go's validation is stricter than goldmark's pad/truncate strategy |
+| Strict table column count validation | `FlagStrictTableColumns` | Header 3 cols, delimiter 2 cols: loosely recognized by default; not recognized as a table with the flag |
+| Table interrupted by adjacent header row | `FlagTableInterruptByHeaders` | Header row adjacent to another heading: recognized as heading by default; recognized as table header with the flag |
+| XHTML entity encoding in HTML renderer | `FlagNoXHTMLEntityEncoding` | `"` and `'` encoded as `&quot;` `&#39;` by default; left as plain characters with the flag (goldmark behavior) |
 | Inline span / bracket extra spaces | — | Side effect of goldmark's DOM traversal, should not be replicated |
 
 > See `DIFFCHECK_REPORT.md` for the full comparison report.
@@ -369,6 +372,8 @@ Major differences can be aligned via the `GoldmarkCompat` preset:
 | wasm/README.md | wasm/ | WebAssembly browser usage guide |
 | diffcheck/README.md | diffcheck/ | Engine cross-comparison tool docs |
 | DIFFCHECK_REPORT.md | root | Engine comparison report (md4go / md4c / goldmark) |
+| benchmark/README.md | benchmark/ | Benchmark suite guide (md4go / md4c / goldmark) |
+| benchmark/BENCHMARK_REPORT.md | benchmark/ | Latest benchmark results |
 
 ## Acknowledgments
 
