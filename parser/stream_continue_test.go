@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -28,23 +29,39 @@ func (s *lineListSource) NextLine() ([]byte, bool, error) {
 	s.i++
 	return l, true, nil
 }
-func (s *lineListSource) LineNumber() int            { return s.i }
-func (s *lineListSource) DocEndsWithNewline() bool   { return true }
+func (s *lineListSource) LineNumber() int          { return s.i }
+func (s *lineListSource) DocEndsWithNewline() bool { return true }
+
+type failDocEnterRenderer struct {
+	renderer.NopRenderer
+	err error
+}
+
+func (r *failDocEnterRenderer) EnterBlock(t ast.BlockType, _ any) error {
+	if t == ast.BlockDoc {
+		return r.err
+	}
+	return nil
+}
 
 // blockStateRec tracks the block span stack and classifies each Text event as
 // protected (inside a code/html block) or top-level.
 type blockStateRec struct {
 	renderer.NopRenderer
-	stack   []ast.BlockType
+	stack          []ast.BlockType
+	entered        []ast.BlockType
+	left           []ast.BlockType
 	protectedTexts []string
 	liftTexts      []string
 }
 
 func (r *blockStateRec) EnterBlock(t ast.BlockType, _ any) error {
+	r.entered = append(r.entered, t)
 	r.stack = append(r.stack, t)
 	return nil
 }
-func (r *blockStateRec) LeaveBlock(ast.BlockType, any) error {
+func (r *blockStateRec) LeaveBlock(t ast.BlockType, _ any) error {
+	r.left = append(r.left, t)
 	if len(r.stack) > 0 {
 		r.stack = r.stack[:len(r.stack)-1]
 	}
@@ -64,6 +81,16 @@ func (r *blockStateRec) Text(_ ast.TextType, b []byte) error {
 		r.liftTexts = append(r.liftTexts, string(b))
 	}
 	return nil
+}
+
+func countBlock(events []ast.BlockType, target ast.BlockType) int {
+	count := 0
+	for _, event := range events {
+		if event == target {
+			count++
+		}
+	}
+	return count
 }
 
 // TestParseStreamContinue_CodeBlockAcrossChunks proves a fenced code block
@@ -129,6 +156,12 @@ func TestParseStreamContinue_ParagraphAcrossChunks(t *testing.T) {
 		if !strings.Contains(joined, w) {
 			t.Fatalf("%q missing from lift text: %q", w, joined)
 		}
+	}
+	if got := countBlock(rec.entered, ast.BlockP); got != 1 {
+		t.Fatalf("paragraph must enter once across chunks, got %d enters: %v", got, rec.entered)
+	}
+	if got := countBlock(rec.left, ast.BlockP); got != 1 {
+		t.Fatalf("paragraph must leave once across chunks, got %d leaves: %v", got, rec.left)
 	}
 }
 
@@ -201,6 +234,59 @@ func TestParseStreamContinue_ReusableAfterEnd(t *testing.T) {
 	}
 	if strings.Contains(joined2, "first") {
 		t.Fatalf("first stream leaked into second: %q", rec2.liftTexts)
+	}
+}
+
+func TestParseStreamContinue_EmptyFirstChunkPreservesBOMStripping(t *testing.T) {
+	t.Parallel()
+	p := New(FlagStripBOM)
+	rec := &blockStateRec{}
+
+	if err := p.ParseStreamContinue(&lineListSource{}, rec); err != nil {
+		t.Fatalf("empty Continue: %v", err)
+	}
+	if err := p.ParseStreamContinue(&lineListSource{lines: [][]byte{[]byte("\xef\xbb\xbfHello")}}, rec); err != nil {
+		t.Fatalf("Continue with first real line: %v", err)
+	}
+	if err := p.ParseStreamEnd(rec); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+
+	joined := strings.Join(rec.liftTexts, "")
+	if strings.Contains(joined, "\ufeff") {
+		t.Fatalf("BOM should be stripped from first real line after empty chunk: %q", joined)
+	}
+	if !strings.Contains(joined, "Hello") {
+		t.Fatalf("first real line text missing: %q", joined)
+	}
+}
+
+func TestParseStreamContinue_DocEnterErrorDoesNotStartStream(t *testing.T) {
+	t.Parallel()
+	sentinel := errors.New("doc enter failed")
+	p := New(0)
+
+	err := p.ParseStreamContinue(&lineListSource{lines: [][]byte{[]byte("lost")}}, &failDocEnterRenderer{err: sentinel})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel error, got %v", err)
+	}
+	if p.InProtectedBlock() {
+		t.Fatal("failed Doc entry must not leave a started protected-block state")
+	}
+
+	rec := &blockStateRec{}
+	if err := p.ParseStreamContinue(&lineListSource{lines: [][]byte{[]byte("fresh")}}, rec); err != nil {
+		t.Fatalf("retry Continue after failed Doc entry: %v", err)
+	}
+	if err := p.ParseStreamEnd(rec); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	joined := strings.Join(rec.liftTexts, "")
+	if !strings.Contains(joined, "fresh") {
+		t.Fatalf("fresh retry text missing: %q", joined)
+	}
+	if strings.Contains(joined, "lost") {
+		t.Fatalf("failed stream input leaked into retry: %q", joined)
 	}
 }
 

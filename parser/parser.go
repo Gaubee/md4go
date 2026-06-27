@@ -24,7 +24,7 @@ type Parser struct {
 	compat            compatConfig // pre-computed compatibility behavior decisions
 	triggers          *triggerTable
 	markChars         [256]bool // per-parser mark character map (extensions can add chars)
-	tableProtectedBuf []bool // reusable buffer for splitTableCells
+	tableProtectedBuf []bool    // reusable buffer for splitTableCells
 
 	// Streaming-continuation state (ParseStreamContinue / ParseStreamEnd).
 	// When streamStarted is true, streamCtx holds the parser context across
@@ -32,9 +32,10 @@ type Parser struct {
 	// streamPivot holds the previous line's analysis (analyzeLine depends on it).
 	// This restores md4c's native md_parse() continuation semantics: a single
 	// context is fed lines incrementally instead of one-shot documents.
-	streamCtx     *context
-	streamPivot   lineAnalysis
-	streamStarted bool
+	streamCtx       *context
+	streamPivot     lineAnalysis
+	streamFirstLine bool
+	streamStarted   bool
 }
 
 // New creates a Parser with the given flags and optional extenders.
@@ -204,17 +205,23 @@ func (p *Parser) ParseStreamContinue(src stream.LineSource, r renderer.Renderer)
 		p.streamCtx = getContext()
 		p.streamCtx.reset()
 		p.streamPivot = dummyBlankLine
+		p.streamFirstLine = true
 		p.streamStarted = true
 		if err := r.EnterBlock(ast.BlockDoc, nil); err != nil {
 			putContext(p.streamCtx)
 			p.streamCtx = nil
 			p.streamStarted = false
 			p.streamPivot = dummyBlankLine
+			p.streamFirstLine = false
 			return err
 		}
 	}
 	p.streamCtx.flags = p.flags
-	return p.runLineLoop(src, r, p.streamCtx, &p.streamPivot, firstCall)
+	sawLine, err := p.runLineLoop(src, r, p.streamCtx, &p.streamPivot, p.streamFirstLine)
+	if sawLine {
+		p.streamFirstLine = false
+	}
+	return err
 }
 
 // ParseStreamEnd finalizes a streaming-continuation parse started by
@@ -230,6 +237,7 @@ func (p *Parser) ParseStreamEnd(r renderer.Renderer) error {
 	p.streamCtx = nil
 	p.streamStarted = false
 	p.streamPivot = dummyBlankLine
+	p.streamFirstLine = false
 	return err
 }
 
@@ -353,7 +361,7 @@ func (p *Parser) parseLinesInternal(src stream.LineSource, r renderer.Renderer, 
 	}
 
 	seed := dummyBlankLine
-	if err := p.runLineLoop(src, r, ctx, &seed, true); err != nil {
+	if _, err := p.runLineLoop(src, r, ctx, &seed, true); err != nil {
 		return err
 	}
 
@@ -366,22 +374,25 @@ func (p *Parser) parseLinesInternal(src stream.LineSource, r renderer.Renderer, 
 // it) at entry; its value at entry seeds the loop and it receives the final
 // line's analysis at exit (so continuation streams can persist it). The loop
 // uses two internal buffers and never writes through prev except at the end.
-func (p *Parser) runLineLoop(src stream.LineSource, r renderer.Renderer, ctx *context, prev *lineAnalysis, isFirstCall bool) error {
+// The returned bool reports whether at least one input line was consumed.
+func (p *Parser) runLineLoop(src stream.LineSource, r renderer.Renderer, ctx *context, prev *lineAnalysis, isFirstLine bool) (bool, error) {
 	var lineBufs [2]lineAnalysis
 	// Seed pivot with a copy of prev so we never mutate prev mid-loop (prev may
 	// be dummyBlankLine, a package-level var).
 	pivot := &lineBufs[0]
 	*pivot = *prev
-	firstLine := isFirstCall
+	firstLine := isFirstLine
+	sawLine := false
 
 	for {
 		line, ok, err := src.NextLine()
 		if err != nil {
-			return err
+			return sawLine, err
 		}
 		if !ok {
 			break
 		}
+		sawLine = true
 
 		// Strip leading UTF-8 BOM (EF BB BF) from the first line when
 		// FlagStripBOM is set. CommonMark does not specify BOM handling;
@@ -406,14 +417,14 @@ func (p *Parser) runLineLoop(src stream.LineSource, r renderer.Renderer, ctx *co
 
 		// Build/close blocks and emit events (md4c md_process_line)
 		if err := p.processLine(ctx, la, r); err != nil {
-			return err
+			return sawLine, err
 		}
 
 		pivot = la
 	}
 	// Persist the final line's analysis back to prev for continuation.
 	*prev = *pivot
-	return nil
+	return sawLine, nil
 }
 
 // finalizeStream performs the document-end cleanup: close any trailing open
@@ -439,81 +450,4 @@ func (p *Parser) finalizeStream(ctx *context, r renderer.Renderer) error {
 	}
 
 	return r.LeaveBlock(ast.BlockDoc, nil)
-}
-
-// ParseStreamContinue feeds lines from src to a streaming-continuation parse,
-// emitting events for any blocks that close during this call. State (open
-// containers, the in-progress leaf block, the previous line's analysis) is
-// preserved across Continue calls on the same Parser, so a code block or
-// paragraph split across chunk boundaries is parsed as a single structure.
-//
-// The first Continue call opens the document (EnterBlock Doc); subsequent calls
-// reuse the existing context. The stream is finalized by ParseStreamEnd.
-//
-// This restores md4c's native md_parse() continuation semantics: md4c's C API
-// is called once per line with a shared context, whereas md4go's one-shot
-// Parse/ParseStream reset the context each call. Continue/End expose the
-// incremental, state-preserving mode that md4c was designed around.
-func (p *Parser) ParseStreamContinue(src stream.LineSource, r renderer.Renderer) error {
-	firstCall := !p.streamStarted
-	if firstCall {
-		p.streamCtx = &context{}
-		p.streamCtx.reset()
-		p.streamPivot = dummyBlankLine
-		p.streamStarted = true
-		if err := r.EnterBlock(ast.BlockDoc, nil); err != nil {
-			return err
-		}
-	}
-	p.streamCtx.flags = p.flags
-	return p.runLineLoop(src, r, p.streamCtx, &p.streamPivot, firstCall)
-}
-
-// ParseStreamEnd finalizes a streaming-continuation parse started by
-// ParseStreamContinue: closes any trailing open block and containers, emits
-// footnote definitions, leaves the Doc block, and clears the continuation
-// state so the Parser can start a fresh stream. It must be called exactly once
-// at end-of-stream.
-func (p *Parser) ParseStreamEnd(r renderer.Renderer) error {
-	if !p.streamStarted {
-		return nil
-	}
-	ctx := p.streamCtx
-	err := p.finalizeStream(ctx, r)
-	p.streamCtx = nil
-	p.streamStarted = false
-	p.streamPivot = dummyBlankLine
-	return err
-}
-
-// InProtectedBlock reports whether the streaming-continuation parse is
-// currently inside a block whose content should be treated as verbatim
-// (fenced/indented code block or HTML block) rather than as inline markdown.
-// It reads the live parser context, so it reflects the state AFTER the most
-// recently fed line(s) — including blocks whose EnterBlock/LeaveBlock events
-// are deferred until the block closes (md4c's one-line lookahead).
-//
-// A front-of-pipe guard (e.g. a custom-syntax detector) queries this to decide
-// whether a candidate marker at the current cursor is inside a protected
-// region and should be passed through untouched.
-//
-// Only valid between ParseStreamContinue calls on a started stream; returns
-// false otherwise.
-func (p *Parser) InProtectedBlock() bool {
-	if !p.streamStarted || p.streamCtx == nil {
-		return false
-	}
-	ctx := p.streamCtx
-	// An open HTML block (md4c html_block_type tracking).
-	if ctx.htmlBlockType > 0 {
-		return true
-	}
-	// The currently-accumulating leaf block is a code/html block.
-	if cur := ctx.blk.current; cur != nil {
-		switch cur.Type {
-		case ast.BlockCode, ast.BlockHTML:
-			return true
-		}
-	}
-	return false
 }
