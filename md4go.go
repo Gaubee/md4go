@@ -71,6 +71,25 @@ func (p *Parser) ParseStream(src stream.LineSource, r renderer.Renderer) error {
 	return p.p.ParseStream(src, r)
 }
 
+// ParseStreamContinue feeds lines from src to a state-preserving streaming
+// parse. Block/container state survives across Continue calls on the same
+// Parser, so a structure split across chunks is parsed as one.
+func (p *Parser) ParseStreamContinue(src stream.LineSource, r renderer.Renderer) error {
+	return p.p.ParseStreamContinue(src, r)
+}
+
+// ParseStreamEnd finalizes a streaming-continuation parse started by
+// ParseStreamContinue and clears continuation state.
+func (p *Parser) ParseStreamEnd(r renderer.Renderer) error {
+	return p.p.ParseStreamEnd(r)
+}
+
+// InProtectedBlock reports whether the streaming-continuation parse is
+// currently inside a verbatim block (fenced/indented code block or HTML block).
+func (p *Parser) InProtectedBlock() bool {
+	return p.p.InProtectedBlock()
+}
+
 // ParseBlocksOnly parses src and emits only block-level events, skipping the
 // entire inline analysis pipeline. This is significantly faster for use cases
 // that only need document structure (headings, block types, validation).

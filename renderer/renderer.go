@@ -32,3 +32,14 @@ type Renderer interface {
 	// use len(text). The caller must not retain the slice beyond the call.
 	Text(t ast.TextType, text []byte) error
 }
+
+// NopRenderer is an embeddable Renderer whose methods do nothing. Embed it and
+// override only the methods you care about, so you don't have to implement all
+// five when you only need (say) Text events.
+type NopRenderer struct{}
+
+func (NopRenderer) EnterBlock(ast.BlockType, any) error { return nil }
+func (NopRenderer) LeaveBlock(ast.BlockType, any) error { return nil }
+func (NopRenderer) EnterSpan(ast.SpanType, any) error   { return nil }
+func (NopRenderer) LeaveSpan(ast.SpanType, any) error   { return nil }
+func (NopRenderer) Text(ast.TextType, []byte) error     { return nil }
